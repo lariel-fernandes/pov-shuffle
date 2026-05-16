@@ -14,10 +14,12 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "matplotlib       >=3.10.9",
     "pytest           >=8.0",
     "setuptools       >=80.9",
     "ruff             ~=0.14",
     "jupyter          ~=1.1",
+    "tqdm             >=4.67.3",
 ]
 
 # === Ruff ========================================================================================
