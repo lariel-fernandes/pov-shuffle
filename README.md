@@ -11,9 +11,14 @@ uv add pov-shuffle
 
 ## Usage
 ```python
+from povs import POVSOptions
 from povs.numpy import pov_shuffle
 
-pov_shuffle(my_array, iterations=3)
+pov_shuffle(
+    my_array,
+    iterations=3,
+    options=POVSOptions(...),
+)
 ```
 - See `help(pov_shuffle)` for more details.
 
