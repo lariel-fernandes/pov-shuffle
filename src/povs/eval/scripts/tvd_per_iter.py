@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from povs import POVSOptions
+from povs.utils import get_block_counts, get_valid_offsets
 
 from ..exercises import tvd_per_iteration
 from ..io import save_tvd_per_iter_report
@@ -19,7 +20,7 @@ deck_size = 512
 max_iterations = 6
 ngram_degrees = [2, 3]
 povs_options = POVSOptions(
-    physical_block_size=32,
+    physical_block_size=16,
     virtual_block_size=3,
     offset_step_size=4,
     max_offset_steps=16,
@@ -27,6 +28,7 @@ povs_options = POVSOptions(
 
 # Infer details
 start_time = datetime.now()
+_, num_vblocks = get_block_counts(deck_size=deck_size, **povs_options._asdict())
 worker_data_scan_per_iter = (povs_options.physical_block_size * povs_options.virtual_block_size) / num_samples
 
 # Run experiment
@@ -67,6 +69,9 @@ report = TVDPerIterReport(
         ngram_degrees=ngram_degrees,
         baseline_ngram_tvds=result.baseline_ngram_tvds,
     ),
+    num_valid_offsets=len(get_valid_offsets(**povs_options._asdict())),
+    ideal_worker_count=num_vblocks,
+    host_shuffle_load=(num_vblocks * povs_options.virtual_block_size) / deck_size,
 )
 
 # Save the report

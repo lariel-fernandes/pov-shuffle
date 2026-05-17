@@ -1,8 +1,7 @@
-import math
-
 import numpy as np
 
 from povs import POVSOptions
+from povs.utils import get_block_counts, get_valid_offsets
 
 
 def pov_shuffle(
@@ -31,13 +30,11 @@ def pov_shuffle(
     assert options.offset_step_size % options.physical_block_size != 0
 
     # Collect offsets that are not multiples of the physical block size
-    all_offsets = [(n_steps * options.offset_step_size) for n_steps in range(1, options.max_offset_steps + 1)]
-    valid_offsets = [offset for offset in all_offsets if offset % options.physical_block_size != 0]
+    valid_offsets = get_valid_offsets(**options._asdict())
     assert len(valid_offsets) >= 2
 
     # Calculate number of blocks with rounding up
-    n_blocks = math.ceil(len(data) / options.physical_block_size)
-    n_vblocks = math.ceil(n_blocks / options.virtual_block_size)
+    n_blocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
 
     for _ in range(iterations):
         offset = valid_offsets[rng.integers(0, len(valid_offsets))]
