@@ -15,12 +15,12 @@ from ..reports import TVDPerIterReport
 # Parameters
 results_path = Path("./data")
 seed = 42
-num_samples = 1000
-deck_size = 512
+num_samples = 3000
+deck_size = 1024
 max_iterations = 6
 ngram_degrees = [2, 3]
 povs_options = POVSOptions(
-    physical_block_size=16,
+    physical_block_size=32,
     virtual_block_size=3,
     offset_step_size=4,
     max_offset_steps=16,

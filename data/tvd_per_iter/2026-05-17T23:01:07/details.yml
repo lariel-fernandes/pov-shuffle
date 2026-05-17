@@ -1,0 +1,20 @@
+seed: 42
+deck_size: 1024
+num_samples: 3000
+max_iterations: 6
+worker_data_scan_per_iter: 0.032
+num_valid_offsets: 14
+ideal_worker_count: 11
+host_shuffle_load: 0.0322265625
+povs_options:
+  physical_block_size: 32
+  virtual_block_size: 3
+  offset_step_size: 4
+  max_offset_steps: 16
+ngram_degrees:
+- 2
+- 3
+baseline_tvd: 0.22940162913004558
+baseline_ngram_tvds:
+- 0.007536935636608023
+- 0.2285308578656678

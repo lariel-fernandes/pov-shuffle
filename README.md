@@ -22,6 +22,15 @@ pov_shuffle(
 ```
 - See `help(pov_shuffle)` for more details.
 
+## Performance
+
+Total Variation Distance of the POV shuffle distribution when compared to an observed uniform shuffle distribution,
+in terms of positional bias an n-gram bias, with the evolution in the number of iterations.
+
+Using a dataset of 1k distinct elements and estimating the distributions from 3k independent shuffling episodes.
+
+![alt text](./data/tvd_per_iter/2026-05-17T23:01:07/tvd_per_iteration.png)
+
 ## Algorithm
 
 ### How it works
@@ -42,7 +51,7 @@ while the random offset prevents the occurrence of shuffle artifacts from the ph
   - Larger blocks (both physical and virtual) increase the portion of the data that needs to be loaded into each worker at each iteration.
   - On the other hand, smaller physical blocks increase the total number of physical blocks, so the host program has to do more non-parallel shuffles when randomly assigning them to virtual blocks.
   - Therefore, as a rule of thumb one should use larger blocks to shorten the time per iteration, or smaller blocks if the priority is reducing the data transfer to workers.
-  - Remarkably, so far we have observed little impact of this parameter on the convergence of the shuffle.
+  - Remarkably, so far we have observed little impact of this parameter on the amount of iterations needed for shuffle convergence.
 
 ### Diagrams
 Algorithm flowchart:
