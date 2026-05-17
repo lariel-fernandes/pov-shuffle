@@ -29,7 +29,13 @@ start_time = datetime.now()
 worker_data_scan_per_iter = (povs_options.physical_block_size * povs_options.virtual_block_size) / num_samples
 
 # Run experiment
-tvds, baseline = tvd_per_iteration(deck_size, num_samples, max_iterations, povs_options, np.random.default_rng(seed))
+tvds, baseline = tvd_per_iteration(
+    deck_size=deck_size,
+    num_samples=num_samples,
+    max_iterations=max_iterations,
+    options=povs_options,
+    rng=np.random.default_rng(seed),
+)
 
 # Put together the report
 report = TVDPerIterReport(
@@ -54,5 +60,6 @@ report = TVDPerIterReport(
 
 # Save the report
 save_tvd_per_iter_report(
-    report=report, path=results_path / Path(__file__).stem / start_time.strftime("%Y-%m-%dT%H:%M:%S")
+    report=report,
+    path=results_path / Path(__file__).stem / start_time.strftime("%Y-%m-%dT%H:%M:%S"),
 )
