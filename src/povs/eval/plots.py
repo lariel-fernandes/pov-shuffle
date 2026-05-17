@@ -33,7 +33,7 @@ def plot_tvd_per_iteration(
         ax.axhline(y=baseline_ngram_tvds[i], color=color, linestyle="--")
 
     ax.set_xlabel("Iterations")
-    ax.set_ylabel("TVD")
+    ax.set_ylabel("Total Variation Distance")
     ax.set_title("POV Shuffle — TVD per Iteration")
     ax.grid(True)
     handles, labels = ax.get_legend_handles_labels()
