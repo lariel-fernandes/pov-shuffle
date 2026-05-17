@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,14 @@ povs_options = POVSOptions(
 # Run experiment
 tvds, baseline = tvd_per_iteration(deck_size, num_samples, max_iterations, povs_options, np.random.default_rng(seed))
 
+# Generate plots
+plot = plot_tvd_per_iteration(
+    tvds,
+    baseline=baseline,
+    worker_data_scan_per_iter=(povs_options.physical_block_size * povs_options.virtual_block_size) / num_samples,
+)
+
 # Save results
-results_path.mkdir(parents=True, exist_ok=True)
-plot_tvd_per_iteration(tvds, baseline).savefig(results_path / "tvd_per_iteration.png")
+experiment_dir = results_path / Path(__file__).stem / datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+experiment_dir.mkdir(parents=True, exist_ok=True)
+plot.savefig(experiment_dir / "tvd_per_iteration.png")
