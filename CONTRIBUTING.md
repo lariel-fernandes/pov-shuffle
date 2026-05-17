@@ -14,3 +14,9 @@ uv run ruff check --fix
 ```bash
 uv run pytest ./src/tests/
 ```
+
+### Running Evaluations
+TVD per iteration:
+```bash
+uv run python -m povs.eval.scripts.tvd_per_iter
+```

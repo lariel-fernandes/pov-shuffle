@@ -20,6 +20,8 @@ dev = [
     "ruff             ~=0.14",
     "jupyter          ~=1.1",
     "tqdm             >=4.67.3",
+    "pandas           >=3.0.3",
+    "pyyaml           >=6.0.3",
 ]
 
 # === Ruff ========================================================================================
@@ -56,7 +58,7 @@ select = [
     "I",   # isort
     "TCH", # Typecheck
     "SIM", # flake8-simplify
-    "TID", # flake8-tidy-imports
+#    "TID", # flake8-tidy-imports
 ]
 ignore = [
     "E501",  # Line too long

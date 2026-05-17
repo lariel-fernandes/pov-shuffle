@@ -28,4 +28,4 @@ def get_tvd(permutations: np.ndarray) -> float:
 
         measures[j] = abs_differences / 2
 
-    return measures.mean()
+    return float(measures.mean())
