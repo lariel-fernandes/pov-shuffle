@@ -29,7 +29,7 @@ in terms of positional bias an n-gram bias, with the evolution in the number of 
 
 Using a dataset of 1k distinct elements and estimating the distributions from 3k independent shuffling episodes.
 
-![alt text](./data/tvd_per_iter/2026-05-17T23:01:07/tvd_per_iteration.png)
+[![alt text](./data/tvd_per_iter/2026-05-17T23:01:07/tvd_per_iteration.png)](./data/tvd_per_iter/2026-05-17T23:01:07)
 
 ## Algorithm
 

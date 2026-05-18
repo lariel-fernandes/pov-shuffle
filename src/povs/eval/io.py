@@ -14,8 +14,10 @@ def save_tvd_per_iter_report(path: Path, report: TVDPerIterReport) -> None:
 
     (path / "details.yml").write_text(yaml.dump(details))
 
+    (path / "README.md").write_text(report.__doc__)
+
     tvds.to_csv(path / "tvds.csv", index=False)
 
     ngram_tvds.to_csv(path / "ngram_tvds.csv", index=False)
 
-    plot.savefig(path / "tvd_per_iteration.png")
+    plot.savefig(path / "plot.png")
