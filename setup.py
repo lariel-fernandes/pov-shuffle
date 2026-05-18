@@ -7,7 +7,6 @@ from typing import NamedTuple, ForwardRef
 import cutlass_library
 import torch.utils.cpp_extension
 from setuptools import setup
-from torch.utils.cpp_extension import CUDAExtension, BuildExtension as BaseBuildExtension
 
 
 class EnvVars(NamedTuple):
@@ -106,7 +105,7 @@ build_options = load_env_vars()
 os.environ["CUDA_HOME"] = torch.utils.cpp_extension.CUDA_HOME = cuda_home
 
 
-class BuildExtension(BaseBuildExtension):
+class BuildExtension(torch.utils.cpp_extension.BuildExtension):
     """Custom build extension command."""
 
     def run(self):
@@ -130,7 +129,7 @@ setup(
         "build_ext": BuildExtension,
     },
     ext_modules=[
-        CUDAExtension(
+        torch.utils.cpp_extension.CUDAExtension(
             name="povs._cuda",
             sources=find_sources(
                 path="src/povs/__cuda",
