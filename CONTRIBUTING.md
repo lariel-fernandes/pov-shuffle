@@ -3,20 +3,21 @@
 ```bash
 uv sync --frozen
 ```
+- Always required before testing/evaluating if there were changes to C++/CUDA sources.
 
 ### Format & Lint
 ```bash
-uv run ruff format
-uv run ruff check --fix
+uv run --no-sync ruff format
+uv run --no-sync ruff check --fix
 ```
 
 ### Test
 ```bash
-uv run pytest ./src/tests/
+.venv/bin/python -m pytest ./src/tests/
 ```
 
 ### Running Evaluations
 TVD per iteration:
 ```bash
-uv run python -m povs.eval.scripts.tvd_per_iter
+.venv/bin/python -m povs.eval.scripts.tvd_per_iter
 ```
