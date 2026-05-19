@@ -29,6 +29,7 @@ dev = [
     "tqdm             >=4.67.3",
     "pandas           >=3.0.3",
     "pyyaml           >=6.0.3",
+    "pybind11-stubgen >=2.5.5",
 ]
 
 [tool.uv]

@@ -21,3 +21,13 @@ TVD per iteration:
 ```bash
 .venv/bin/python -m povs.eval.scripts.tvd_per_iter
 ```
+
+## Generate stubs
+```bash
+.venv/bin/python -c '
+import torch
+import pybind11_stubgen;
+
+pybind11_stubgen.main(["povs._cuda", "-o", "src"]);
+'
+```

@@ -12,7 +12,11 @@ def pov_shuffle(
 ) -> None:
     """Pseudo-parallel POV Shuffle implementation based on NumPy and CPU processing.
 
-    :param data: Data array to shuffle in place.
+    This is just meant for testing and validations, not for production use,
+    as a standard O(n) shuffle on the CPU should always perform better than
+    the iterative parallel version in a pseudo-parallel execution.
+
+    :param data: Data array to shuffle in place along the axis 0.
     :param iterations: Number of shuffling iterations to perform.
     :param options: POV Shuffle algorithm options.
     :param seed: Random seed or random number generator state.
