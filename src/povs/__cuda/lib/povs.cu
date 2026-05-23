@@ -8,8 +8,8 @@
 
 template <typename DType, int PBlockSize, int VBlockSize>
 void povs_cuda(
-    DType* Xg_ptr,     // Row-major (num_instances, instance_size) -> Column-major (instance_size, num_instances)
-    const int* Oh_ptr, // (num_valid_offsets,)
+    DType* Xg_ptr,     // Instances to shuffle in place. Column-major (instance_size, num_instances) -- equivalent to Row-major (num_instances, instance_size).
+    const int* Oh_ptr, // Valid block start offsets with dim (num_valid_offsets,)
     const int num_instances,
     const int instance_size,
     const int iterations,

@@ -3,6 +3,6 @@
 
 #include <torch/torch.h>
 
-torch::Tensor torch_povs(torch::Tensor X);
+void torch_povs(torch::Tensor X, torch::Tensor O, int iterations, int pblock_size, int vblock_size, int seed);
 
 #endif
