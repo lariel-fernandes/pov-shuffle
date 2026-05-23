@@ -90,9 +90,8 @@ def get_generated_files(opts: EnvVars) -> list[tuple[str, str]]:
     """Get codegen files for build options."""
     return [
         ("povs_cuda_template_instances.gen.inc", "\n".join([
-            "INSTANTIATE_POVS_CUDA_%s(%s, %s)" % values
+            "INSTANTIATE_POVS_CUDA_ALL_TYPES(%s, %s)" % values
             for values in itertools.product(
-                map(str.upper, opts.POVS_CUDA_DTYPES),
                 opts.POVS_CUDA_PBLOCK_SIZES,
                 opts.POVS_CUDA_VBLOCK_SIZES,
             )

@@ -32,7 +32,7 @@ def pov_shuffle(
 
     torch_binding(
         data,
-        torch.tensor(valid_offsets),
+        torch.tensor(valid_offsets, dtype=torch.int64),
         iterations,
         options.physical_block_size,
         options.virtual_block_size,
