@@ -6,6 +6,15 @@
 
 #include "./utils.h"
 
+// clang-format off
+#define DISPATCH_CUDA_ARCH(cuda_arch, lambda) \
+    [&]() {                                   \
+        if      (cuda_arch >= 900) { constexpr int kCudaArch = 900; lambda(); } \
+        else if (cuda_arch >= 800) { constexpr int kCudaArch = 800; lambda(); } \
+        else                       { constexpr int kCudaArch = 700; lambda(); } \
+    }()
+// clang-format on
+
 // Host function to get cuda architecture of specified device ID
 int get_device_cuda_arch(int8_t device_id)
 {
@@ -62,7 +71,7 @@ template <typename DType, int PBlockSize, int VBlockSize>
 __global__ void povs_kernel(
     const DType* Xg_ptr, // Instances to shuffle in place - Global device memory pointer.
                          // Col-major (instance_size, num_instances)
-    const DType* Vg_ptr, // Virtual block assignments - Global device memory pointer.
+    const long* Vg_ptr,  // Virtual block assignments - Global device memory pointer.
                          // Col-major (VBlockSize, num_vblocks)
     const long offset,   // Physical block start offset
     const long num_instances,
@@ -89,24 +98,32 @@ void povs_cuda(
 {
     cudaError_t cudaStatus = cudaSuccess;
     const int cuda_arch = get_device_cuda_arch(device_id);
+    const long num_pblocks = div_round_up(num_instances, static_cast<long>(PBlockSize));
+    const long num_vblocks = div_round_up(num_pblocks, static_cast<long>(VBlockSize));
 
-    printf(
-        "povs_cuda: num_instances=%ld, instance_size=%ld, iterations=%d, pblock_size=%d, vblock_size=%d, seed=%d\n",
-        num_instances,
-        instance_size,
-        iterations,
-        PBlockSize,
-        VBlockSize,
-        seed
-    );
-    printf("povs_cuda: sizeof(DType)=%zu\n", sizeof(DType));
-    printf("povs_cuda: Xg_ptr=%p\n", Xg_ptr);
-    printf("povs_cuda: Oh_ptr=%p\n", Oh_ptr);
+    // Allocate device pointers
+    long* Vg_ptr = nullptr; // Virtual block assignments - Global device mem pointer. Col-major (VBlockSize, num_vblocks)
+    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaSetDevice(device_id));
+    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMalloc(&Vg_ptr, sizeof(long) * num_vblocks * VBlockSize));
+
+    // TODO: iterate, choose random offset, shuffle assignments
+
+    DISPATCH_CUDA_ARCH(cuda_arch, [&] {
+        const int num_blocks = num_pblocks;
+        constexpr int block_size = get_block_size<kCudaArch>();
+
+        (povs_kernel<DType, PBlockSize, VBlockSize>
+         <<<num_blocks, block_size>>>(Xg_ptr, Vg_ptr, Oh_ptr[0], num_instances, instance_size, seed));
+    });
+    CUDA_CHECK_LAST_STATUS(&cudaStatus, cleanup);
+#ifdef STANDALONE_BUILD
+    // Only synchronize in standalone build (otherwise, the caller is responsible for synchronization)
+    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaDeviceSynchronize());
+#endif
 
 cleanup:
-    if (cudaStatus != cudaSuccess) {
-        exit(cudaStatus);
-    }
+    cudaFree(Vg_ptr);
+    if (cudaStatus != cudaSuccess) exit(cudaStatus);
 }
 
 int main()

@@ -2,6 +2,7 @@
 ## Tasks
 - [ ] Generalize code for algorithm pre-flight and seed selection
 - [ ] Document how to run standalone CUDA program
+- [ ] Parameterize the instance size at build time with default of 1
 
 ## Project Structure
 

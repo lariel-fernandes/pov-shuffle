@@ -16,7 +16,6 @@ class EnvVars(NamedTuple):
     POVS_CUDA_CUDA_ARCH:    list[str] = "native" # Comma-separated list of CUDA architectures (e.g.: 75,86 or native)
     POVS_CUDA_PBLOCK_SIZES: list[int] = "32"     # Comma-separated list of physical block sizes, in number of instances
     POVS_CUDA_VBLOCK_SIZES: list[int] = "3"      # Comma-separated list of virtual block sizes, in number of physical blocks
-    POVS_CUDA_DTYPES:       list[str] = "float"  # Comma-separated list of shuffled data types (options: int, long, half, float, double)
 
 
 def load_env_vars() -> EnvVars:

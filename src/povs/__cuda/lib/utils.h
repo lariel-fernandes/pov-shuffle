@@ -27,4 +27,13 @@ inline bool cuda_check_status(const cudaError_t status, const char* file, const 
         if (cuda_check_status(cudaGetLastError(), __FILE__, __LINE__, status_ptr)) goto label; \
     }
 
+// Round-up division
+template <typename DType>
+DType div_round_up(DType a, DType b)
+{
+    return (a + b - 1) / b;
+};
+int div_round_up(int a, int b);
+long div_round_up(long a, long b);
+
 #endif
