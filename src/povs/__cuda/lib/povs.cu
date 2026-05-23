@@ -10,9 +10,9 @@
 // clang-format off
 #define DISPATCH_CUDA_ARCH(cuda_arch, lambda) \
     [&]() {                                   \
-        if      (cuda_arch >= 900) { constexpr int kCudaArch = 900; lambda(); } \
-        else if (cuda_arch >= 800) { constexpr int kCudaArch = 800; lambda(); } \
-        else                       { constexpr int kCudaArch = 700; lambda(); } \
+        if      (cuda_arch >= 900) { constexpr int kCudaArch = 900; return lambda(); } \
+        else if (cuda_arch >= 800) { constexpr int kCudaArch = 800; return lambda(); } \
+        else                       { constexpr int kCudaArch = 700; return lambda(); } \
     }()
 // clang-format on
 
@@ -107,18 +107,18 @@ void povs_cuda(
     std::mt19937 rng(seed);
     std::uniform_int_distribution offset_dist(0l, num_offsets - 1);
 
-    // Allocate device pointers
-    int* Sg_ptr = nullptr;  // Virtual block random seeds - Global device memory pointer with shape (num_vblocks,)
-    long* Ag_ptr = nullptr; // Physical to Virtual block assignments - Global device mem pointer. Col-major (VBlockSize, num_vblocks). Each
-                            // column [:,j] holds the IDs of the ith pblocks assigned to the jth vblock
-    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaSetDevice(device_id));
-    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMalloc(&Sg_ptr, sizeof(int) * num_vblocks));
-    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMalloc(&Ag_ptr, sizeof(long) * num_assignments));
-
     // Allocate host pointers
     long* Ah_ptr = new long[num_assignments]; // Physical to Virtual block assignments - Host memory pointer with shape (num_assignments,)
     for (int i = 0; i < num_assignments; ++i)
         Ah_ptr[i] = i < num_pblocks ? i : -1; // Initialize with identity mapping for every valid pblock ID, padding with -1
+
+    // Allocate device pointers
+    int* Sg_ptr = nullptr;  // Virtual block random seeds - Global device memory pointer with shape (num_vblocks,)
+    long* Ag_ptr = nullptr; // Physical to Virtual block assignments - Global device mem pointer. Col-major (VBlockSize, num_vblocks)
+                            // Each column [:,j] holds the IDs of the ith pblocks assigned to the jth vblock
+    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaSetDevice(device_id));
+    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMalloc(&Sg_ptr, sizeof(int) * num_vblocks));
+    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMalloc(&Ag_ptr, sizeof(long) * num_assignments));
 
     // Iterate Kernel submissions
     for (int iter = 0; iter < iterations; ++iter) {
