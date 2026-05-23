@@ -46,5 +46,5 @@ int main()
 #if __has_include("povs_cuda_template_instances.gen.inc")
 #include "povs_cuda_template_instances.gen.inc"
 #else
-INSTANTIATE_POVS_CUDA_ALL_TYPES(8, 2)
+INSTANTIATE_POVS_CUDA(float, 8, 2)
 #endif

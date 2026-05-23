@@ -16,6 +16,7 @@ class EnvVars(NamedTuple):
     POVS_CUDA_CUDA_ARCH:    list[str] = "native" # Comma-separated list of CUDA architectures (e.g.: 75,86 or native)
     POVS_CUDA_PBLOCK_SIZES: list[int] = "32"     # Comma-separated list of physical block sizes, in number of instances
     POVS_CUDA_VBLOCK_SIZES: list[int] = "3"      # Comma-separated list of virtual block sizes, in number of physical blocks
+    POVS_CUDA_DTYPES:       list[str] = "float"  # Comma-separated list of shuffled data types (options: int, long, half, float, double)
 
 
 def load_env_vars() -> EnvVars:
@@ -89,8 +90,9 @@ def get_generated_files(opts: EnvVars) -> list[tuple[str, str]]:
     """Get codegen files for build options."""
     return [
         ("povs_cuda_template_instances.gen.inc", "\n".join([
-            "INSTANTIATE_POVS_CUDA_ALL_TYPES(%s, %s)" % values
+            "INSTANTIATE_POVS_CUDA_%s(%s, %s)" % values
             for values in itertools.product(
+                map(str.upper, opts.POVS_CUDA_DTYPES),
                 opts.POVS_CUDA_PBLOCK_SIZES,
                 opts.POVS_CUDA_VBLOCK_SIZES,
             )
