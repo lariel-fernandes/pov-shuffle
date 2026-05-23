@@ -2,6 +2,7 @@ import torch
 
 from ._cuda import torch_binding
 from .options import POVSOptions
+from .utils import get_valid_offsets
 
 
 def pov_shuffle(
@@ -19,9 +20,21 @@ def pov_shuffle(
     """
     assert data.get_device() != -1, "Tensor device must be CUDA"
 
+    # Validate parameters
+    assert iterations >= 1
+    assert options.virtual_block_size >= 2
+    assert options.max_offset_steps >= 2
+    assert options.offset_step_size % options.physical_block_size != 0
+
+    # Collect offsets that are not multiples of the physical block size
+    valid_offsets = get_valid_offsets(**options._asdict())
+    assert len(valid_offsets) >= 2
+
     torch_binding(
         data,
+        torch.tensor(valid_offsets),
         iterations,
-        *options,
+        options.physical_block_size,
+        options.virtual_block_size,
         seed if isinstance(seed, int) else int(torch.randint(0, 1000, (1,), generator=seed).item()),
     )

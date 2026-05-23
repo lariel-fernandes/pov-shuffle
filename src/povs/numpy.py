@@ -1,7 +1,7 @@
 import numpy as np
 
-from povs import POVSOptions
-from povs.utils import get_block_counts, get_valid_offsets
+from .options import POVSOptions
+from .utils import get_block_counts, get_valid_offsets
 
 
 def pov_shuffle(

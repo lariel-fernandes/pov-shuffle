@@ -6,9 +6,15 @@ uv sync --frozen
 - Always required before testing/evaluating if there were changes to C++/CUDA sources.
 
 ### Format & Lint
+Python:
 ```bash
 uv run --no-sync ruff format
 uv run --no-sync ruff check --fix
+```
+
+C++/CUDA:
+```bash
+find src -name "*.cpp" -o -name "*.h" -o -name "*.cu" | xargs clang-format -i
 ```
 
 ### Test

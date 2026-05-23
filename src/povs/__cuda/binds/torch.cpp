@@ -16,25 +16,24 @@
 #endif
 // clang-format on
 
-#define PBLOCK_SIZE_DISPATCH(x, lambda)                            \
-    [&]() {                                                                    \
-        switch (x) {                                                   \
-            PBLOCK_SIZE_CASES(lambda)                                      \
+#define PBLOCK_SIZE_DISPATCH(x, lambda)                                  \
+    [&]() {                                                              \
+        switch (x) {                                                     \
+            PBLOCK_SIZE_CASES(lambda)                                    \
             default: TORCH_CHECK(false, "Unsupported PBLOCK_SIZE: ", x); \
-        }                                                                      \
+        }                                                                \
     }()
 
-#define VBLOCK_SIZE_DISPATCH(x, lambda)                            \
-[&]() {                                                                    \
-switch (x) {                                                   \
-VBLOCK_SIZE_CASES(lambda)                                      \
-default: TORCH_CHECK(false, "Unsupported VBLOCK_SIZE: ", x); \
-}                                                                      \
-}()
+#define VBLOCK_SIZE_DISPATCH(x, lambda)                                  \
+    [&]() {                                                              \
+        switch (x) {                                                     \
+            VBLOCK_SIZE_CASES(lambda)                                    \
+            default: TORCH_CHECK(false, "Unsupported VBLOCK_SIZE: ", x); \
+        }                                                                \
+    }()
 
-torch::Tensor torch_povs(
-    torch::Tensor X
-)
+void torch_povs(torch::Tensor X, torch::Tensor O, int iterations, int pblock_size, int vblock_size, int seed)
 {
-
+    TORCH_CHECK(X.is_cuda(), "X must be a CUDA tensor");
+    TORCH_CHECK(!O.is_cuda(), "O must be a CPU tensor");
 }

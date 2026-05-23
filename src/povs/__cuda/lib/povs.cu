@@ -1,16 +1,44 @@
-# include "povs.h"
+#include "povs.h"
+
+#include <cstdio>
+#include <cuda_runtime.h>
+#include <cute/tensor.hpp>
+
+#include "./utils.h"
 
 template <typename DType, int PBlockSize, int VBlockSize>
-DType* povs_cuda(
-
+void povs_cuda(
+    DType* Xg_ptr,     // Row-major (num_instances, instance_size) -> Column-major (instance_size, num_instances)
+    const int* Oh_ptr, // (num_valid_offsets,)
+    const int num_instances,
+    const int instance_size,
+    const int iterations,
+    const int seed
 )
 {
     cudaError_t cudaStatus = cudaSuccess;
-    DType* x = (DType*)malloc(sizeof(DType) * PBlockSize * VBlockSize);
-    return x;
+
+    printf(
+        "povs_cuda: num_instances=%d, instance_size=%d, iterations=%d, pblock_size=%d, vblock_size=%d, seed=%d\n",
+        num_instances,
+        instance_size,
+        iterations,
+        PBlockSize,
+        VBlockSize,
+        seed
+    );
+    printf("povs_cuda: sizeof(DType)=%zu\n", sizeof(DType));
+    printf("povs_cuda: Xg_ptr=%p\n", Xg_ptr);
+    printf("povs_cuda: Oh_ptr=%p\n", Oh_ptr);
+
+cleanup:
+    if (cudaStatus != cudaSuccess) {
+        exit(cudaStatus);
+    }
 }
 
-int main() {
+int main()
+{
     return 0;
 }
 

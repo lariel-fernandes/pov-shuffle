@@ -3,8 +3,6 @@
 
 #include <torch/torch.h>
 
-torch::Tensor torch_povs(
-    torch::Tensor X
-);
+torch::Tensor torch_povs(torch::Tensor X);
 
 #endif
