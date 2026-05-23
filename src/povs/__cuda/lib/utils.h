@@ -28,12 +28,35 @@ inline bool cuda_check_status(const cudaError_t status, const char* file, const 
     }
 
 // Round-up division
-template <typename DType>
-DType div_round_up(DType a, DType b)
+template <typename DTypeA, typename DTypeB>
+auto div_round_up(DTypeA a, DTypeB b)
 {
-    return (a + b - 1) / b;
+    using DTypeC = std::common_type_t<DTypeA, DTypeB>;
+    const auto a_cast = static_cast<DTypeC>(a);
+    const auto b_cast = static_cast<DTypeC>(b);
+    const auto one = static_cast<DTypeC>(1);
+    return (a_cast + b_cast - 1) / b_cast;
 };
-int div_round_up(int a, int b);
-long div_round_up(long a, long b);
+template auto div_round_up(long a, int b);
+
+// Get CUDA device architecture
+inline int get_device_cuda_arch(int8_t device_id)
+{
+    cudaDeviceProp prop{};
+    cudaGetDeviceProperties(&prop, device_id);
+    return prop.major * 100 + prop.minor * 10;
+}
+
+// Shuffle flat array in place
+template <typename DType>
+void shuffle_array(DType* arr, const long size, std::mt19937& rng)
+{
+    for (long i = 0; i < size; i++) {
+        std::uniform_int_distribution dist(i, size - 1);
+        long j = dist(rng);
+        std::swap(arr[i], arr[j]);
+    }
+}
+template void shuffle_array(long arr[], long size, std::mt19937& rng);
 
 #endif
