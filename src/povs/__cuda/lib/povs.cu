@@ -159,6 +159,8 @@ cleanup:
     if (cudaStatus != cudaSuccess) exit(cudaStatus);
 }
 
+#ifdef STANDALONE_BUILD
+// Main function for trying out the standalone CUDA program (not included in package build)
 int main()
 {
     using DType = float;
@@ -200,6 +202,7 @@ int main()
     delete[] Xh_ptr;
     return 0;
 }
+#endif
 
 #if __has_include("povs_cuda_template_instances.gen.inc")
 #include "povs_cuda_template_instances.gen.inc"

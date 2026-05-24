@@ -74,6 +74,8 @@ message(STATUS "TORCH_LIBRARY_DIRS: ${TORCH_LIBRARY_DIRS}")
 
 message(STATUS "#### Configure POVS.cpp library ####")
 
+add_compile_definitions(STANDALONE_BUILD)
+
 file(GLOB_RECURSE SOURCES
         src/povs/__cuda/*.cpp
         src/povs/__cuda/*.cu
