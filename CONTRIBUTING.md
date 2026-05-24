@@ -1,9 +1,5 @@
 
 ## Tasks
-build:
-- [ ] Parameterize the instance size at build time with default of 1
-host code:
-- [ ] Implement the main function for standalone testing
 device code:
 - [ ] Define CUTE tensors in kernel, using lazy transform with the offset and wrap around logic
 - [ ] Do vectorized copy and thread0 shuffling

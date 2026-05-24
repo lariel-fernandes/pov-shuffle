@@ -161,11 +161,48 @@ cleanup:
 
 int main()
 {
+    using DType = float;
+    constexpr int PBlockSize = 8;
+    constexpr int VBlockSize = 2;
+    constexpr int InstanceSize = 1;
+
+    constexpr long num_instances = 64;
+    constexpr int iterations = 1;
+    constexpr int seed = 42;
+    constexpr int8_t device_id = 0;
+
+    auto* Xh_ptr = new DType[num_instances];
+    for (long i = 0; i < num_instances; ++i)
+        Xh_ptr[i] = static_cast<DType>(i);
+
+    constexpr int num_offsets = 1;
+    constexpr long Oh_ptr[num_offsets] = {0};
+
+    DType* Xg_ptr = nullptr;
+    cudaError_t status = cudaMalloc(&Xg_ptr, sizeof(DType) * num_instances);
+    if (status != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(status));
+        delete[] Xh_ptr;
+        return 1;
+    }
+    cudaMemcpy(Xg_ptr, Xh_ptr, sizeof(DType) * num_instances, cudaMemcpyHostToDevice);
+
+    povs_cuda<DType, PBlockSize, VBlockSize, InstanceSize>(Xg_ptr, num_instances, Oh_ptr, num_offsets, iterations, seed, device_id);
+    cudaMemcpy(Xh_ptr, Xg_ptr, sizeof(DType) * num_instances, cudaMemcpyDeviceToHost);
+
+    constexpr long print_limit = 32;
+    printf("Output (first %ld): ", print_limit);
+    for (long i = 0; i < print_limit; ++i)
+        printf("%.0f ", Xh_ptr[i]);
+    printf("\n");
+
+    cudaFree(Xg_ptr);
+    delete[] Xh_ptr;
     return 0;
 }
 
 #if __has_include("povs_cuda_template_instances.gen.inc")
 #include "povs_cuda_template_instances.gen.inc"
 #else
-INSTANTIATE_POVS_CUDA_ALL_TYPES(8, 2)
+INSTANTIATE_POVS_CUDA_ALL_TYPES(8, 2, 1)
 #endif

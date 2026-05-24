@@ -37,6 +37,7 @@ def povs_preflight(
     assert iterations >= 1
     assert options.virtual_block_size >= 2
     assert options.max_offset_steps >= 2
+    assert options.offset_step_size > 0
     assert options.offset_step_size % options.physical_block_size != 0
 
     # Collect offsets that are not multiples of the physical block size
