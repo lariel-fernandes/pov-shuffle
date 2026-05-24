@@ -1,7 +1,5 @@
 
 ## Tasks
-docs:
-- [ ] Document how to run standalone CUDA program
 build:
 - [ ] Parameterize the instance size at build time with default of 1
 host code:
@@ -83,3 +81,11 @@ import pybind11_stubgen;
 pybind11_stubgen.main(["povs._cuda", "-o", "src"]);
 '
 ```
+
+## Debug
+
+### Running standalone CUDA programs
+```bash
+make
+```
+- See `make help` for more details.

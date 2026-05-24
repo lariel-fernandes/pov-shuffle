@@ -1,5 +1,7 @@
 # Makefile for standalone CUDA module compilation
 
+.DEFAULT_GOAL := all
+
 # Compiler and tools
 NVCC ?= nvcc
 PYTHON ?= .venv/bin/python
@@ -32,11 +34,10 @@ PROGRAM_H := $(SRC_DIR)/$(PROGRAM).h
 PROGRAM_CU := $(SRC_DIR)/$(PROGRAM).cu
 PROGRAM_BIN := $(BUILD_DIR)/$(PROGRAM).bin
 UTILS_H := $(SRC_DIR)/utils.h
-UTILS_CU := $(SRC_DIR)/utils.cu
 
-$(PROGRAM_BIN): $(PROGRAM_CU) $(PROGRAM_H) $(UTILS_CU) $(UTILS_H)
+$(PROGRAM_BIN): $(PROGRAM_CU) $(PROGRAM_H) $(UTILS_H)
 	@mkdir -p $(BUILD_DIR)
-	$(NVCC) $(NVCC_FLAGS) $(CUDA_FLAGS) $(INCLUDES) -o $@ $< $(UTILS_CU)
+	$(NVCC) $(NVCC_FLAGS) $(CUDA_FLAGS) $(INCLUDES) -o $@ $<
 
 .PHONY: compile
 compile: $(PROGRAM_BIN)
@@ -44,7 +45,7 @@ compile: $(PROGRAM_BIN)
 .PHONY: debug
 debug:
 	@mkdir -p $(BUILD_DIR)
-	$(NVCC) $(NVCC_DEBUG_FLAGS) $(CUDA_FLAGS) $(INCLUDES) -o $(PROGRAM_BIN) $(PROGRAM_CU) $(UTILS_CU)
+	$(NVCC) $(NVCC_DEBUG_FLAGS) $(CUDA_FLAGS) $(INCLUDES) -o $(PROGRAM_BIN) $(PROGRAM_CU)
 
 .PHONY: run
 run:
@@ -55,7 +56,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 .PHONY: all
-all: clean compile
+all: compile run
 
 .PHONY: help
 help:
@@ -64,7 +65,7 @@ help:
 	@echo "  debug   - Build program with debug symbols (-g -G -O0)"
 	@echo "  run     - Run program"
 	@echo "  clean   - Remove build artifacts"
-	@echo "  all     - Clean and compile (default)"
+	@echo "  all     - Compile and run (default)"
 	@echo ""
 	@echo "Variables (can override):"
 	@echo "  NVCC        = $(NVCC)"
