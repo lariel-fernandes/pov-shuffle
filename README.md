@@ -4,23 +4,34 @@ _**P**arallel **O**ffset **V**irtual-block Shuffle_
 A parallelizable, iterative algorithm for efficiently shuffling large datasets in place at scale,
 while sufficiently approximating a uniform shuffle within few iterations.
 
-## Installation
-```bash
-uv add pov-shuffle
-```
-
 ## Usage
 ```python
-from povs import POVSOptions
-from povs.numpy import pov_shuffle
+from povs import POVSOptions, pov_shuffle
 
 pov_shuffle(
-    my_array,
+    data,  # A numpy array or PyTorch tensor
     iterations=3,
     options=POVSOptions(...),
 )
 ```
 - See `help(pov_shuffle)` for more details.
+
+## Installation
+```bash
+uv add pov-shuffle
+```
+
+### Build Customization
+Because of optimizations within the CUDA extension, the domain of certain parameters must be specified via environment variables at build time
+(see [setup.py](setup.py) for the list of variables and their defaults).
+
+In order to set environment variables consistently across builds we recommend using UV's [`extra-build-variables`](https://docs.astral.sh/uv/reference/settings/#extra-build-variables).
+Example:
+```bash
+# pyproject.toml
+[tool.uv]
+extra-build-variables = { pov-shuffle = { POVS_CUDA_PBLOCK_SIZES = "42,19,512" } } 
+```
 
 ## Performance
 

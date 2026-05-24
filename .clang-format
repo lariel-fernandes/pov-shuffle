@@ -1,0 +1,75 @@
+---
+# clang-format configuration for C/CUDA code
+BasedOnStyle: LLVM
+Language: Cpp
+
+# Includes
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Main header.
+  - Regex: '^"[^\/]*$'
+    SortPriority: 1
+  # External headers.
+  - Regex: '^<.*|^"[^\.].*'
+    SortPriority: 2
+  # Local headers.
+  - Regex: '^"\..*'
+    SortPriority: 3
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+IndentCaseLabels: true
+IndentPPDirectives: None
+
+# Line breaks
+InsertNewlineAtEOF: true
+
+# Line length
+ColumnLimit: 140
+BreakBeforeTernaryOperators: false
+
+# Pointer and reference alignment
+PointerAlignment: Left
+
+# Braces
+BreakBeforeBraces: Linux
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterStruct: false
+  AfterEnum: false
+
+# Spacing
+SpaceAfterCStyleCast: true
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+
+# Alignment
+AlignAfterOpenBracket: BlockIndent
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignOperands: true
+AlignEscapedNewlines: Left
+
+# Function declarations/calls
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
+BinPackParameters: false
+BinPackArguments: false
+AlwaysBreakTemplateDeclarations: Yes
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# Lambda formatting
+LambdaBodyIndentation: Signature
+AllowShortLambdasOnASingleLine: All
+
+# Comments
+ReflowComments: true
+
+# Switch cases
+AllowShortCaseLabelsOnASingleLine: true
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
