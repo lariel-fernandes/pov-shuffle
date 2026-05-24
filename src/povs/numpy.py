@@ -1,7 +1,8 @@
 import numpy as np
 
-from .options import POVSOptions
-from .utils import get_block_counts, get_valid_offsets
+from .constants import MAX_SEED, MIN_SEED
+from .types import POVSOptions
+from .utils import get_block_counts, povs_preflight
 
 
 def pov_shuffle(
@@ -21,27 +22,21 @@ def pov_shuffle(
     :param options: POV Shuffle algorithm options.
     :param seed: Random seed or random number generator state.
     """
+    # Coerce seed to generator
     rng = (
         seed
         if isinstance(seed, np.random.Generator)
-        else np.random.default_rng(seed=seed if isinstance(seed, int) else np.random.randint(0, 1000))
+        else np.random.default_rng(seed=seed if isinstance(seed, int) else np.random.randint(MIN_SEED, MAX_SEED))
     )
 
-    # Validate parameters
-    assert iterations >= 1
-    assert options.virtual_block_size >= 2
-    assert options.max_offset_steps >= 2
-    assert options.offset_step_size % options.physical_block_size != 0
+    # Validate parameters and get valid offsets
+    offsets = povs_preflight(iterations, options)
 
-    # Collect offsets that are not multiples of the physical block size
-    valid_offsets = get_valid_offsets(**options._asdict())
-    assert len(valid_offsets) >= 2
-
-    # Calculate number of blocks with rounding up
-    n_blocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
+    # Block count arithmetic
+    n_pblocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
 
     for _ in range(iterations):
-        offset = valid_offsets[rng.integers(0, len(valid_offsets))]
+        offset = offsets[rng.integers(0, len(offsets))]  # Sample a pblocks start offset
         seeds = rng.integers(0, 1000, size=n_vblocks)  # random seed for each virtual block
 
         # Build a mapping of each virtual block ID to its physical block IDs
@@ -57,13 +52,13 @@ def pov_shuffle(
             local = np.concat([
                 _safe_read_arr(data, offset, bid * options.physical_block_size, options.physical_block_size)
                 for bid in bids
-                if bid < n_blocks
+                if bid < n_pblocks
             ])
             np.random.RandomState(seed=seeds[vbid]).shuffle(local)
 
             # Write back shuffled data to physical blocks
             for i, bid in enumerate(bids):
-                if bid < n_blocks:
+                if bid < n_pblocks:
                     shuffled = local[i * options.physical_block_size : (i + 1) * options.physical_block_size]
                     _safe_set_arr(data, offset, bid * options.physical_block_size, shuffled)
 

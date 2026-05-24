@@ -1,15 +1,19 @@
 
 ## Tasks
-python:
-- [ ] Generalize code for algorithm pre-flight and seed selection
 docs:
 - [ ] Document how to run standalone CUDA program
 build:
 - [ ] Parameterize the instance size at build time with default of 1
+host code:
+- [ ] Implement the main function for standalone testing
 device code:
 - [ ] Define CUTE tensors in kernel, using lazy transform with the offset and wrap around logic
 - [ ] Do vectorized copy and thread0 shuffling
 - [ ] Implement Fisher-Yates shuffle of a CUTE tensor for the device
+evaluation:
+- [ ] do some plot that compares against a standard local block shuffle!
+- [ ] add the exercise of breaking point by dataset size
+
 
 ## Project Structure
 
@@ -25,7 +29,7 @@ device code:
 │   │   ├── numpy.py         # NumPy interface
 │   │   ├── torch.py         # PyTorch interface
 │   │   ├── utils.py         # Stateless utilities
-│   │   ├── options.py       # API options schema
+│   │   ├── types.py         # Public API types and aliases
 │   │   ├── eval/...         # Benchmark and evaluation resources
 │   │   │
 │   │   ├── __cuda           # CUDA extension sources

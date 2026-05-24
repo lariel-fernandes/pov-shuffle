@@ -2,17 +2,14 @@ import numpy as np
 import torch
 import torch as t
 
+from .constants import MAX_SEED, MIN_SEED
 from .numpy import pov_shuffle as pov_shuffle_numpy
-from .options import POVSOptions
 from .torch import pov_shuffle as pov_shuffle_torch
+from .types import POVSOptions
 
 __all__ = [
     "POVSOptions",
 ]
-
-# TODO:
-#   - do some plot that compares against a standard local block shuffle!
-#   - add the exercise of breaking point by dataset size
 
 
 def pov_shuffle(
@@ -29,18 +26,20 @@ def pov_shuffle(
     :param seed: Random seed or random number generator state.
     """
 
-    # Use numpy CPU implementation for CPU tensors
+    # Use numpy implementation for CPU tensors
     if isinstance(data, t.Tensor) and data.get_device() == -1:
         data = data.numpy()
 
     if isinstance(data, np.ndarray):
         if isinstance(seed, t.Generator):
-            seed = int(torch.randint(0, 1000, (1,), generator=seed).item())
+            # For numpy impl, coerce torch generator to numerical seed
+            seed = int(torch.randint(MIN_SEED, MAX_SEED, (1,), generator=seed).item())
         pov_shuffle_numpy(data, iterations, options, seed)
 
     elif isinstance(data, t.Tensor):
         if isinstance(seed, np.random.Generator):
-            seed = int(seed.integers(0, 1000))
+            # For torch impl, coerce numpy generator to numerical seed
+            seed = int(seed.integers(MIN_SEED, MAX_SEED))
         pov_shuffle_torch(data, iterations, options, seed)
 
     else:
