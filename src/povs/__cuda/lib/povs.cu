@@ -53,15 +53,14 @@ auto __device__ get_tiled_copy()
  *  Each GPU program block maps to a single virtual Block through `blockIdx.x`
  *  Each virtual block maps to `VBlockSize` physical blocks through the `V` mapping
  */
-template <typename DType, int PBlockSize, int VBlockSize>
+template <typename DType, int PBlockSize, int VBlockSize, int InstanceSize>
 __global__ void povs_kernel(
     const DType* Xg_ptr, // Instances to shuffle in place - Global device memory pointer.
-                         // Col-major (instance_size, num_instances)
-    const long* Vg_ptr,  // Virtual block assignments - Global device memory pointer.
+                         // Col-major (InstanceSize, num_instances)
+    const long* Ag_ptr,  // Physical to Virtual block assignments - Global device memory pointer.
                          // Col-major (VBlockSize, num_vblocks)
     const long offset,   // Physical block start offset
     const long num_instances,
-    const long instance_size,
     const int seed
 )
 {
@@ -78,12 +77,11 @@ constexpr int get_block_size()
 }
 
 /** POV Shuffle -- CUDA host program */
-template <typename DType, int PBlockSize, int VBlockSize>
+template <typename DType, int PBlockSize, int VBlockSize, int InstanceSize>
 void povs_cuda(
     DType* Xg_ptr, // Instances to shuffle in place - Global device memory pointer.
-                   // Col-major (instance_size, num_instances) -- equivalent to Row-major (num_instances, instance_size)
+                   // Col-major (InstanceSize, num_instances) -- equivalent to Row-major (num_instances, InstanceSize)
     const long num_instances,
-    const long instance_size,
 
     const long* Oh_ptr, // Valid block start offsets with dim (num_offsets,) - Host memory pointer
     const long num_offsets,
@@ -135,8 +133,8 @@ void povs_cuda(
             CUDA_CHECK_STATUS(&cudaStatus, end_lambda, cudaMemcpy(Ag_ptr, Ah_ptr, sizeof(long) * num_assignments, cudaMemcpyHostToDevice));
 
             // Submit kernel
-            (povs_kernel<DType, PBlockSize, VBlockSize>
-             <<<num_blocks, block_size>>>(Xg_ptr, Ag_ptr, offset, num_instances, instance_size, seed));
+            (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize>
+             <<<num_blocks, block_size>>>(Xg_ptr, Ag_ptr, offset, num_instances, seed));
 
             lambda_completed = true; // If we reached this point, the lambda executed successfully
         end_lambda:

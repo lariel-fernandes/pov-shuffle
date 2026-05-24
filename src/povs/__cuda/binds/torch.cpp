@@ -14,6 +14,11 @@
 #define VBLOCK_SIZE_CASES(lambda) \
     case 2: { constexpr int VBLOCK_SIZE = 2; return lambda(); }
 #endif
+
+#ifndef INSTANCE_SIZE_CASES
+#define INSTANCE_SIZE_CASES(lambda) \
+    case 2: { constexpr int INSTANCE_SIZE = 1; return lambda(); }
+#endif
 // clang-format on
 
 #define PBLOCK_SIZE_DISPATCH(x, lambda)                                  \
@@ -32,9 +37,17 @@
         }                                                                \
     }()
 
+#define INSTANCE_SIZE_DISPATCH(x, lambda)                                  \
+    [&]() {                                                                \
+        switch (x) {                                                       \
+            INSTANCE_SIZE_CASES(lambda)                                    \
+            default: TORCH_CHECK(false, "Unsupported INSTANCE_SIZE: ", x); \
+        }                                                                  \
+    }()
+
 void torch_povs(
-    const torch::Tensor X, // Data to shuffle in place along the axis 0
-    const torch::Tensor O, // Valid block start offsets
+    const torch::Tensor& X, // Data to shuffle in place along the axis 0
+    const torch::Tensor& O, // Valid block start offsets
     const int iterations,
     const int pblock_size,
     const int vblock_size,
@@ -60,13 +73,15 @@ void torch_povs(
 
         PBLOCK_SIZE_DISPATCH(pblock_size, [&]() {
             VBLOCK_SIZE_DISPATCH(vblock_size, [&]() {
-                // clang-format off
-                (povs_cuda<scalar_t, PBLOCK_SIZE, VBLOCK_SIZE>)(
-                    Xg_ptr, num_instances, instance_size,
-                    Oh_ptr, num_offsets,
-                    iterations, seed, X.get_device()
-                );
-                // clang-format on
+                INSTANCE_SIZE_DISPATCH(vblock_size, [&]() {
+                    // clang-format off
+                    (povs_cuda<scalar_t, PBLOCK_SIZE, VBLOCK_SIZE, INSTANCE_SIZE>)(
+                        Xg_ptr, num_instances,
+                        Oh_ptr, num_offsets,
+                        iterations, seed, X.get_device()
+                    );
+                    // clang-format on
+                });
             });
         });
     });
