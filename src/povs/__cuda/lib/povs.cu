@@ -134,6 +134,7 @@ __global__ void povs_kernel(
         });
 
         // Vectorized, predicated copy head and tail from global device memory to shared SM memory
+        // clang-format off
         copy_if(
             copy_tiler,
             bXg_pblk_head_pred,
@@ -146,6 +147,7 @@ __global__ void povs_kernel(
             thr_copy_tiler.partition_S(bXg_pblk_tail),
             thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
         );
+        // clang-format on
     }
 
     // ### Stage 2 ###
