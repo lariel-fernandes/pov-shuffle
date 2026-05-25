@@ -74,32 +74,28 @@ __global__ void povs_kernel(
     const int seed = Sg_ptr[vblock_id];
     // auto tiled_copy = get_tiled_copy<DType, get_cuda_arch(), BlockSize>();
 
-    // Block-owned assignment tensors in global device mem and register mem, respectively, both with shape (VBlockSize,).
-    // Each position `i` contains the index of the assigned physical block, or -1 if padding.
-    auto bAg = make_tensor(Ag_ptr + (VBlockSize * vblock_id), make_layout(make_shape(Int<VBlockSize>{})));
-    auto bAr = make_fragment_like(bAg);
-    for (int i = 0; i < VBlockSize; ++i)
-        bAr[i] = bAg[i];
+    // Reusable layouts
+    auto pblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}));
+    auto vblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}, Int<VBlockSize>{}));
+    auto assignments_layout = make_layout(make_shape(Int<VBlockSize>{}, vblock_id));
+    auto permutation_layout = take<1, 3>(vblock_layout); // vblock_layout without the instance dimension
 
-    // Block-owned data instances tensor in shared SM memory, Col-major with shape (InstanceSize, PBlockSize, VBlockSize).
-    __shared__ DType bXs_ptr[size(InstanceSize * PBlockSize * VBlockSize)];
-    auto bXs = make_tensor(make_smem_ptr(bXs_ptr), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}, Int<VBlockSize>{})));
+    // Reusable (lazy) identity tensors
+    auto pblock_identity = make_identity_tensor(shape(pblock_layout));
+    auto vblock_identity = make_identity_tensor(shape(vblock_layout));
 
-    // Block-owned permutation index tensor in shared SM memory with shape (PBlockSize * VBlockSize,).
-    // Finding the value `j` at position `i` means that bXs[:,j] should travel to bXg[:,i] as the result of shuffling.
-    __shared__ int bIs_ptr[size(PBlockSize * VBlockSize)];
-    auto bIs = make_tensor(make_smem_ptr(bIs_ptr), make_layout(make_shape(Int<PBlockSize * VBlockSize>{})));
+    // Define assignment tensors and copy to registers for fast access
+    auto Ag = make_tensor(Ag_ptr, assignments_layout); // Global device memory
+    auto bAg = Ag(_, vblock_id);                       // Block-owned in global device mem
+    auto bAr = make_fragment_like(bAg);                // Block-owned in registers
+    copy(bAr, bAg);                                    // Copy from global device mem to registers
 
-    // Define predicate of block-owned data instances
-    auto bXp = lazy::transform(make_identity_tensor(bXs.shape()), [&](auto coord) {
-        const auto iid_in_pblk = get<1>(coord);           // instance id within pblock
-        const auto pbid_in_vblk = get<2>(coord);          // pblock id within vblock
-        const auto pbid = bAr[pbid_in_vblk];              // Global pblock id that was assigned to this vblock
-        const auto iid = pbid * PBlockSize + iid_in_pblk; // Global instance ID that is part of that pblock
-        if (pbid == -1) return false;                     // Check for assignment padding
-        if (iid >= num_instances) return false;           // Check for instance over-indexing in the last pblock
-        return true;
-    });
+    // ### Stage 1 ###
+    // Vectorized copy of target instances from global device mem to SM shared memory
+
+    // Block-owned data instances tensor in shared SM memory
+    __shared__ DType bXs_ptr[size(vblock_layout)];
+    auto bXs = make_tensor(make_smem_ptr(bXs_ptr), vblock_layout);
 
     // For each pblock id within this vblock
     for (int pbid_in_vblk = 0; pbid_in_vblk < VBlockSize; ++pbid_in_vblk) {
@@ -113,30 +109,52 @@ __global__ void povs_kernel(
         const auto tail_length = max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Wrapped around pblock instances
         const auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
 
-        // Block-owned data instances tensor in global device mem, local partitioned for that pblock, with shape (InstanceSize, PBlockSize).
-        auto bXg_pblk = make_tensor(Xg_ptr + (oiid_start * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
-        auto bXg_pblk_pred = lazy::transform(make_identity_tensor(bXg_pblk.shape()), [&](auto coord) {
-            const auto iid_in_pblk = get<1>(coord);       // instance id within pblock
-            const auto iid = iid_start + iid_in_pblk;     // Global instance ID that is part of that pblock
-            if (iid >= num_instances) return false;       // Check for instance over-indexing in the last pblock
-            if (iid_in_pblk >= head_length) return false; // Check if instance is part of the pblock tail that goes over the wrap around
-            return true;
+        // Base predicate to prevent instance over-indexing in the last physical block
+        auto pblock_pred = lazy::transform(pblock_identity, [&](auto coord) {
+            const auto iid_in_pblk = get<1>(coord);   // instance id within pblock
+            const auto iid = iid_start + iid_in_pblk; // Global instance ID that is part of that pblock
+            return iid < num_instances;
         });
 
-        // Tail of bXg_pblk that goes over the wrap around
-        auto bXg_pblk_tail =
-            make_tensor(Xg_ptr - (head_length * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
-        auto bXg_pblk_tail_pred = lazy::transform(make_identity_tensor(bXg_pblk_tail.shape()), [&](auto coord) {
-            const auto iid_in_pblk = get<1>(coord);      // instance id within pblock
-            const auto iid = iid_start + iid_in_pblk;    // Global instance ID that is part of that pblock
-            if (iid >= num_instances) return false;      // Check for instance over-indexing in the last pblock
-            if (iid_in_pblk < head_length) return false; // Check if instance is part of the pblock head that is before the wrap around
-            return true;
+        // Block-owned data instances tensors in global device mem, local partitioned for that pblock, with shape (InstanceSize, PBlockSize)
+        // For the pblock that goes over the wrap around, the head and tail point to the instances before and after the wrap, respectively.
+        auto bXg_pblk_head = make_tensor(Xg_ptr + (oiid_start * InstanceSize), pblock_layout);
+        auto bXg_pblk_tail = make_tensor(Xg_ptr - (head_length * InstanceSize), pblock_layout);
+
+        // Define predicates for the head and tail, guarding against over-indexing in each case
+        auto bXg_pblk_head_pred = lazy::transform(pblock_identity, [&](auto coord) {
+            const auto iid_in_pblk = get<1>(coord);                 // instance id within pblock
+            return pblock_pred[coord] && iid_in_pblk < head_length; // Guard against over-indexing and ignore tail instances
+        });
+        auto bXg_pblk_tail_pred = lazy::transform(pblock_identity, [&](auto coord) {
+            const auto iid_in_pblk = get<1>(coord);                  // instance id within pblock
+            return pblock_pred[coord] && iid_in_pblk >= head_length; // Guard against over-indexing and ignore head instances
         });
 
         // Copy bXg_pblk to bXs[:,:head_length,pbid_in_vblk] where predicate bXg_pblk_pred allows, vectorizing by a thread layout
         // Copy bXg_pblk_tail to bXs[:,head_length:,pbid_in_vblk] where predicate bXg_pblk_tail_pred allows, vectorizing by a thread layout
     }
+
+    // ### Stage 2 ###
+    // Generate permutation index in shared SM memory (populate with identity in parallel, then run a single-threaded shuffle)
+
+    // Block-owned permutation index tensor in shared SM memory
+    __shared__ int bIs_ptr[size(permutation_layout)];
+    auto bIs = make_tensor(make_smem_ptr(bIs_ptr), permutation_layout);
+
+    // ### Stage 3 ###
+    // Parallel write permutated instances from shared SM memory back to mapped positions in global device memory
+
+    // Define predicate of block-owned data instances
+    auto bXp = lazy::transform(vblock_identity, [&](auto coord) {
+        const auto iid_in_pblk = get<1>(coord);           // instance id within pblock
+        const auto pbid_in_vblk = get<2>(coord);          // pblock id within vblock
+        const auto pbid = bAr[pbid_in_vblk];              // Global pblock id that was assigned to this vblock
+        const auto iid = pbid * PBlockSize + iid_in_pblk; // Global instance ID that is part of that pblock
+        if (pbid == -1) return false;                     // Check for assignment padding
+        if (iid >= num_instances) return false;           // Check for instance over-indexing in the last pblock
+        return true;
+    });
 
     // Data instances tensor in global device memory, Col-major with shape (InstanceSize, num_instances)
     auto Xg = make_tensor(Xg_ptr, make_layout(make_shape(Int<InstanceSize>{}, num_instances)));
