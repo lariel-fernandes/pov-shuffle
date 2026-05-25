@@ -7,6 +7,11 @@
 
 #include "./utils.h"
 
+// Closed-open interval for sampling a numerical seed from a distribution.
+// Aligned with the respective constants in the Python module `povs.constants` for reproducibility.
+static constexpr int MIN_SEED = 0;
+static constexpr int MAX_SEED = 1000;
+
 // clang-format off
 #define DISPATCH_CUDA_ARCH(cuda_arch, lambda) \
     [&]() {                                   \
@@ -104,7 +109,7 @@ void povs_cuda(
     // Initialize random distributions
     std::mt19937 rng(seed);
     std::uniform_int_distribution offset_dist(0l, num_offsets - 1);
-    std::uniform_int_distribution seed_dist(0, 1000);
+    std::uniform_int_distribution seed_dist(MIN_SEED, MAX_SEED - 1);
 
     // Allocate host pointers
     long* Sh_ptr = new long[num_vblocks];     // Random generator seeds - Host memory pointer with shape (num_vblocks,)
