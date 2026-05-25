@@ -36,8 +36,10 @@ template <typename DType, int CudaArch, int BitWidth>
 constexpr auto __device__ get_copy_atom()
 {
     using namespace cute;
-    if constexpr (CudaArch >= 800 && BitWidth >= 32) return Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<uint_bit_t<BitWidth>>, DType>{};
-    else return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
+    if constexpr (CudaArch >= 800 && BitWidth >= 32)
+        return Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<uint_bit_t<BitWidth>>, DType>{};
+    else
+        return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
 }
 
 template <typename DType, int CudaArch, int BlockSize, int InstanceSize>
@@ -73,24 +75,40 @@ __global__ void povs_kernel(
     const uint vblock_id = blockIdx.x;
     const int seed = Sg_ptr[vblock_id];
 
+    // Define tilers for distributing throughput across threads when copying between global and shared mem
     auto copy_tiler = get_tiled_copy<DType, get_cuda_arch(), BlockSize, InstanceSize>();
     auto thr_copy_tiler = copy_tiler.get_slice(threadIdx.x);
 
-    // Reusable layouts
+    // Define reusable layouts
     auto pblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}));
     auto vblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}, Int<VBlockSize>{}));
+    auto vblock_coarse_layout = take<1, 3>(vblock_layout); // vblock_layout without the instance dimension
     auto assignments_layout = make_layout(make_shape(Int<VBlockSize>{}, vblock_id));
-    auto permutation_layout = take<1, 3>(vblock_layout); // vblock_layout without the instance dimension
+    auto flat_comp_tiler =
+        make_layout(make_shape(Int<BlockSize>{})); // GPU threads-block layout for partitioning the computation of flat tensors
 
-    // Reusable (lazy) identity tensors
-    auto pblock_identity = make_identity_tensor(shape(pblock_layout));
-    auto vblock_identity = make_identity_tensor(shape(vblock_layout));
+    // Define (lazy) identity tensors
+    auto pblock_identity = make_identity_tensor(shape(pblock_layout)); // Physical block identity
+    auto vblock_identity = make_identity_tensor(shape(vblock_layout)); // Virtual block identity
 
     // Define assignment tensors and copy to registers for fast access
     auto Ag = make_tensor(Ag_ptr, assignments_layout); // Global device memory
     auto bAg = Ag(_, vblock_id);                       // Block-owned in global device mem
     auto bAr = make_fragment_like(bAg);                // Block-owned in registers
     copy(bAg, bAr);                                    // Copy from global device mem to registers
+
+    // Sort bAr ascending, treating -1 (padding) as +infinity so it sinks to the end.
+    // Guarantees the truncated last pblock (highest ID, if assigned here) lands at the last valid slot,
+    // keeping the permutation index gap-free for the Fisher-Yates shuffle in Stage 2.
+    for (int i = 1; i < VBlockSize; ++i) {
+        long key = bAr[i];
+        int j = i - 1;
+        while (j >= 0 && key != -1 && (bAr[j] == -1 || bAr[j] > key)) {
+            bAr[j + 1] = bAr[j];
+            --j;
+        }
+        bAr[j + 1] = key;
+    }
 
     // ### Stage 1 ###
     // Vectorized predicated copy of assigned physical blocks from global device mem to SM shared memory
@@ -153,9 +171,45 @@ __global__ void povs_kernel(
     // ### Stage 2 ###
     // Generate permutation index in shared SM memory (populate with identity in parallel, then run a single-threaded shuffle)
 
-    // Block-owned permutation index tensor in shared SM memory
-    __shared__ int bIs_ptr[size(permutation_layout)];
-    auto bIs = make_tensor(make_smem_ptr(bIs_ptr), permutation_layout);
+    // Permutation index tensor
+    __shared__ int bIs_ptr[size(vblock_coarse_layout)];                   // Block-owned shared mem pointer
+    auto bIs = make_tensor(make_smem_ptr(bIs_ptr), vblock_coarse_layout); // Block-owned tensor in SM shared memory
+    auto bIi = make_identity_tensor(shape(bIs));                          // Block-owned lazy identity tensor
+    auto tIs = local_partition(bIs, flat_comp_tiler, threadIdx.x);        // Thread-owned tensor in SM shared memory
+    auto tIi = local_partition(bIi, flat_comp_tiler, threadIdx.x);        // Thread-owned lazy identity tensor in SM
+    copy(bIi, bIs);                                                       // Parallel initialize permutation index with identity
+
+    // Block-owned (lazy) permutation index predicate
+    auto bIp = lazy::transform(bIi, [&](auto coord) {
+        const auto iid_in_pblk = get<0>(coord);           // Instance id within physical block
+        const auto pbid_in_vblk = get<1>(coord);          // Physical block id within virtual block
+        const auto pbid = bAr[pbid_in_vblk];              // Global id of assigned physical block
+        const auto iid = PBlockSize * pbid + iid_in_pblk; // Global instance ID that is part of that physical block
+        if (pbid == -1) return false;                     // Guard against assignment padding
+        if (iid >= num_instances) return false;           // Guard against instance over-indexing in the last physical block
+        return true;
+    });
+
+    // Find the last valid index (inclusive) in the permutation index tensor, which determines the boundary for the Fisher-Yates shuffle
+    int shuffle_boundary = 0;
+    for (int i = size(bIs) - 1; i >= 0; --i) {
+        if (bIp[i]) {
+            shuffle_boundary = i;
+            break;
+        }
+    }
+
+    // Fisher-Yates shuffle of the permutation index in shared SM memory
+    if (threadIdx.x == 0) {
+        std::mt19937 rng(seed); // Initialize random generator with the (GPU)block-specific seed
+        for (int i = 0; i <= shuffle_boundary; ++i) {
+            std::uniform_int_distribution dist(i, shuffle_boundary);
+            int j = dist(rng);
+            int temp = bIs[i];
+            bIs[i] = bIs[j];
+            bIs[j] = temp;
+        }
+    }
 
     // ### Stage 3 ###
     // Parallel write permutated instances from shared SM memory back to mapped positions in global device memory
