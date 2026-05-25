@@ -36,13 +36,16 @@ def pov_shuffle(
     n_pblocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
 
     for _ in range(iterations):
-        offset = offsets[rng.integers(0, len(offsets))]  # Sample a pblocks start offset
-        seeds = rng.integers(0, 1000, size=n_vblocks)  # random seed for each virtual block
+        # WARNING: The sequence of rng usages in the next 3 code blocks must match the one in the CUDA
+        #          implementation for reproducibility (shuffling, then seed sampling, then offset sampling)
 
         # Build a mapping of each virtual block ID to its physical block IDs
         vbid_2_bids = np.arange(n_vblocks * options.virtual_block_size)
         rng.shuffle(vbid_2_bids)
         vbid_2_bids = vbid_2_bids.reshape((n_vblocks, options.virtual_block_size))
+
+        seeds = rng.integers(0, 1000, size=n_vblocks)  # random seed for each virtual block
+        offset = offsets[rng.integers(0, len(offsets))]  # Sample a pblocks start offset
 
         def _worker(vbid: int):
             """Processes a single virtual block ID."""

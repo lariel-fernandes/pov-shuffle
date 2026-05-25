@@ -2,12 +2,12 @@
 ## Tasks
 device code:
 - [ ] Define CUTE tensors in kernel, using lazy transform with the offset and wrap around logic
+- [ ] Allocate smem cute tensor in kernel using formula from the template variables
 - [ ] Do vectorized copy and thread0 shuffling
 - [ ] Implement Fisher-Yates shuffle of a CUTE tensor for the device
 evaluation:
 - [ ] do some plot that compares against a standard local block shuffle!
 - [ ] add the exercise of breaking point by dataset size
-
 
 ## Project Structure
 

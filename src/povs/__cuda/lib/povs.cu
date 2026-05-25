@@ -59,9 +59,9 @@ __global__ void povs_kernel(
                          // Col-major (InstanceSize, num_instances)
     const long* Ag_ptr,  // Physical to Virtual block assignments - Global device memory pointer.
                          // Col-major (VBlockSize, num_vblocks)
+    const int* Sg_ptr,   // Random generator seeds - Global device memory pointer with shape (num_vblocks,)
     const long offset,   // Physical block start offset
-    const long num_instances,
-    const int seed
+    const long num_instances
 )
 {
 }
@@ -104,8 +104,10 @@ void povs_cuda(
     // Initialize random distributions
     std::mt19937 rng(seed);
     std::uniform_int_distribution offset_dist(0l, num_offsets - 1);
+    std::uniform_int_distribution seed_dist(0, 1000);
 
     // Allocate host pointers
+    long* Sh_ptr = new long[num_vblocks];     // Random generator seeds - Host memory pointer with shape (num_vblocks,)
     long* Ah_ptr = new long[num_assignments]; // Physical to Virtual block assignments - Host memory pointer with shape (num_assignments,)
     for (int i = 0; i < num_assignments; ++i)
         Ah_ptr[i] = i < num_pblocks ? i : -1; // Initialize with identity mapping for every valid pblock ID, padding with -1
@@ -120,6 +122,8 @@ void povs_cuda(
 
     // Iterate Kernel submissions
     for (int iter = 0; iter < iterations; ++iter) {
+
+        // Dispatch lambda and capture interruption flag
         const bool interrupted = DISPATCH_CUDA_ARCH(cuda_arch, [&] {
             bool lambda_completed = false; // Flag for detecting if the lambda execution was cut short by an error
 
@@ -127,14 +131,27 @@ void povs_cuda(
             const int num_blocks = num_pblocks;
             constexpr int block_size = get_block_size<kCudaArch>();
 
-            // Sample an offset and shuffle the assignments
-            const long offset = Oh_ptr[offset_dist(rng)];
-            shuffle_array(Ah_ptr, num_pblocks, rng); // Shuffle the physical to virtual block mapping on the host
+            long offset = 0l; // Declare variable before the CUDA status check macros
+                              // to avoid `error: transfer of control bypasses initialization of ...`
+
+            // WARNING: The sequence of rng usages in the next 3 code blocks must match the one in the numpy
+            //          implementation for reproducibility (shuffling, then seed sampling, then offset sampling)
+
+            // Shuffle the pblock to vblock assignments
+            shuffle_array(Ah_ptr, num_pblocks, rng);
             CUDA_CHECK_STATUS(&cudaStatus, end_lambda, cudaMemcpy(Ag_ptr, Ah_ptr, sizeof(long) * num_assignments, cudaMemcpyHostToDevice));
+
+            // Sample random seeds for every vblock
+            for (int i = 0; i < num_vblocks; ++i)
+                Sh_ptr[i] = seed_dist(rng);
+            CUDA_CHECK_STATUS(&cudaStatus, end_lambda, cudaMemcpy(Sg_ptr, Sh_ptr, sizeof(int) * num_vblocks, cudaMemcpyHostToDevice));
+
+            // Sample a pblock start offset
+            offset = Oh_ptr[offset_dist(rng)];
 
             // Submit kernel
             (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize>
-             <<<num_blocks, block_size>>>(Xg_ptr, Ag_ptr, offset, num_instances, seed));
+             <<<num_blocks, block_size>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
 
             lambda_completed = true; // If we reached this point, the lambda executed successfully
         end_lambda:
@@ -154,6 +171,7 @@ void povs_cuda(
 
 cleanup:
     free(Ah_ptr);
+    free(Sh_ptr);
     cudaFree(Ag_ptr);
     cudaFree(Sg_ptr);
     if (cudaStatus != cudaSuccess) exit(cudaStatus);
