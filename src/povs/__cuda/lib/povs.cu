@@ -32,26 +32,26 @@ constexpr int __device__ get_cuda_arch()
 #endif
 }
 
-template <typename DType, int CudaArch, int BitWidth>
-constexpr auto __device__ get_copy_atom()
-{
-    using namespace cute;
-    if constexpr (CudaArch >= 800) return Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<uint_bit_t<BitWidth>>, DType>{};
-    return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
-}
-
-template <typename DType, int CudaArch, int BlockSize>
-auto __device__ get_tiled_copy()
-{
-    using namespace cute;
-    constexpr int BitWidth = 128;
-    constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
-    constexpr auto CopyAtom = get_copy_atom<DType, CudaArch, BitWidth>();
-    auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
-    // TODO: consider using a flat shape when the instance size is 1
-    auto thread_layout = make_layout(make_shape(Int<BlockSize / CopyWidth>{}, Int<CopyWidth>{}));
-    return make_tiled_copy(CopyAtom, thread_layout, value_layout);
-}
+// template <typename DType, int CudaArch, int BitWidth>
+// constexpr auto __device__ get_copy_atom()
+// {
+//     using namespace cute;
+//     if constexpr (CudaArch >= 800) return Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<uint_bit_t<BitWidth>>, DType>{};
+//     return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
+// }
+//
+// template <typename DType, int CudaArch, int BlockSize>
+// auto __device__ get_tiled_copy()
+// {
+//     using namespace cute;
+//     constexpr int BitWidth = 128;
+//     constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
+//     constexpr auto CopyAtom = get_copy_atom<DType, CudaArch, BitWidth>();
+//     auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
+//     // TODO: consider using a flat shape when the instance size is 1
+//     auto thread_layout = make_layout(make_shape(Int<BlockSize / CopyWidth>{}, Int<CopyWidth>{}));
+//     return make_tiled_copy(CopyAtom, thread_layout, value_layout);
+// }
 
 /** POV Shuffle - Single iteration Kernel
  *
@@ -72,7 +72,7 @@ __global__ void povs_kernel(
     using namespace cute;
     const uint vblock_id = blockIdx.x;
     const int seed = Sg_ptr[vblock_id];
-    auto tiled_copy = get_tiled_copy<DType, get_cuda_arch(), BlockSize>();
+    // auto tiled_copy = get_tiled_copy<DType, get_cuda_arch(), BlockSize>();
 
     // Block-owned assignments tensor in global device memory with shape (VBlockSize,).
     // Each position `i` contains the index of the assigned physical block, or -1 if padding.
@@ -80,7 +80,14 @@ __global__ void povs_kernel(
 
     // Block-owned assignments tensor in register memory with shape (VBlockSize,).
     auto bAr = make_fragment_like(bAg);
-    if (threadIdx.x < bAr.size()) bAr[threadIdx.x] = bAg[threadIdx.x];
+    for (int i = 0; i < VBlockSize; ++i) bAr[i] = bAg[i];
+
+    if (thread0()) {
+        printf("vblock_id: %d, seed: %d, assignments: ", vblock_id, seed);
+        for (int i = 0; i < VBlockSize; ++i)
+            printf("%ld ", bAr[i]);
+        printf("\n");
+    }
 
     // Block-owned data instances tensor in shared SM memory, Col-major with shape (InstanceSize, PBlockSize, VBlockSize).
     __shared__ DType bXs_ptr[size(InstanceSize * PBlockSize * VBlockSize)];
@@ -92,9 +99,9 @@ __global__ void povs_kernel(
     auto bIs = make_tensor(make_smem_ptr(bIs_ptr), make_layout(make_shape(Int<PBlockSize * VBlockSize>{})));
 
     // Define predicate of block-owned data instances
-    auto bXp = lazy::transform(bXs, [&](auto coord) {
-        const auto iid_in_pblk = coord[1]; // instance id within pblock
-        const auto pbid_in_vblk = coord[2]; // pblock id within vblock
+    auto bXp = lazy::transform(make_identity_tensor(bXs.shape()), [&](auto coord) {
+        const auto iid_in_pblk = get<1>(coord); // instance id within pblock
+        const auto pbid_in_vblk = get<2>(coord); // pblock id within vblock
         const auto pbid = bAr[pbid_in_vblk]; // Global pblock id that was assigned to this vblock
         const auto iid = pbid * PBlockSize + iid_in_pblk;  // Global instance ID that is part of that pblock
         if (pbid == -1) return false; // Check for assignment padding
@@ -108,16 +115,16 @@ __global__ void povs_kernel(
         if (pbid == -1) continue; // Skip for assignment padding
 
         // Pblock start and wrap around arithmetic
-        auto iid_start = pbid * PBlockSize; // Global instance ID that is the start of the assigned pblock
+        const auto iid_start = pbid * PBlockSize; // Global instance ID that is the start of the assigned pblock
         auto oiid_start = iid_start + offset; // Offset global instance ID that is the start of the assigned pblock
         if (oiid_start >= num_instances) oiid_start -= num_instances; // Wrap around to compensate the offset
-        auto tail_length = PBlockSize - (num_instances - oiid_start); // Number of instances in the pblock that go over the wrap around
-        auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
+        const auto tail_length = max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Number of instances in the pblock that go over the wrap around
+        const auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
 
         // Block-owned data instances tensor in global device memory, local partitioned for that pblock, with shape (InstanceSize, PBlockSize).
         auto bXg_pblk = make_tensor(Xg_ptr + (oiid_start * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
-        auto bXg_pblk_pred = lazy::transform(bXg_pblk, [&](auto coord) {
-            const auto iid_in_pblk = coord[1]; // instance id within pblock
+        auto bXg_pblk_pred = lazy::transform(make_identity_tensor(bXg_pblk.shape()), [&](auto coord) {
+            const auto iid_in_pblk = get<1>(coord); // instance id within pblock
             const auto iid = iid_start + iid_in_pblk; // Global instance ID that is part of that pblock
             if (iid >= num_instances) return false; // Check for instance over-indexing in the last pblock
             if (iid_in_pblk >= head_length) return false; // Check if instance is part of the pblock tail that goes over the wrap around
@@ -125,15 +132,14 @@ __global__ void povs_kernel(
         });
 
         // Tail of bXg_pblk that goes over the wrap around
-        auto bXg_pblk_tail = make_tensor(Xg_ptr + (tail_length * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
-        auto bXg_pblk_tail_pred = lazy::transform(bXg_pblk_tail, [&](auto coord) {
-            const auto iid_in_pblk = coord[1]; // instance id within pblock
+        auto bXg_pblk_tail = make_tensor(Xg_ptr - (head_length * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
+        auto bXg_pblk_tail_pred = lazy::transform(make_identity_tensor(bXg_pblk_tail.shape()), [&](auto coord) {
+            const auto iid_in_pblk = get<1>(coord); // instance id within pblock
+            const auto iid = iid_start + iid_in_pblk; // Global instance ID that is part of that pblock
+            if (iid >= num_instances) return false; // Check for instance over-indexing in the last pblock
             if (iid_in_pblk < head_length) return false; // Check if instance is part of the pblock head that is before the wrap around
             return true;
         });
-
-        // DEBUG: disable the assignment shuffle so we know the assignments of the first vblock, then print here the values of head and tail that would be copied
-        //        manipulate assignments to check what happens in the padding and boundary conditions
 
         // Copy bXg_pblk to bXs[:,:head_length,pbid_in_vblk] where predicate bXg_pblk_pred allows, vectorizing by a thread layout
         // Copy bXg_pblk_tail to bXs[:,head_length:,pbid_in_vblk] where predicate bXg_pblk_tail_pred allows, vectorizing by a thread layout
