@@ -32,26 +32,26 @@ constexpr int __device__ get_cuda_arch()
 #endif
 }
 
-// template <typename DType, int CudaArch, int BitWidth>
-// constexpr auto __device__ get_copy_atom()
-// {
-//     using namespace cute;
-//     if constexpr (CudaArch >= 800) return Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<uint_bit_t<BitWidth>>, DType>{};
-//     return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
-// }
-//
-// template <typename DType, int CudaArch, int BlockSize>
-// auto __device__ get_tiled_copy()
-// {
-//     using namespace cute;
-//     constexpr int BitWidth = 128;
-//     constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
-//     constexpr auto CopyAtom = get_copy_atom<DType, CudaArch, BitWidth>();
-//     auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
-//     // TODO: consider using a flat shape when the instance size is 1
-//     auto thread_layout = make_layout(make_shape(Int<BlockSize / CopyWidth>{}, Int<CopyWidth>{}));
-//     return make_tiled_copy(CopyAtom, thread_layout, value_layout);
-// }
+template <typename DType, int CudaArch, int BitWidth>
+constexpr auto __device__ get_copy_atom()
+{
+    using namespace cute;
+    if constexpr (CudaArch >= 800) return Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<uint_bit_t<BitWidth>>, DType>{};
+    return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
+}
+
+template <typename DType, int CudaArch, int BlockSize>
+auto __device__ get_tiled_copy()
+{
+    using namespace cute;
+    constexpr int BitWidth = 128;
+    constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
+    constexpr auto CopyAtom = get_copy_atom<DType, CudaArch, BitWidth>();
+    auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
+    // TODO: consider using a flat shape when the instance size is 1
+    auto thread_layout = make_layout(make_shape(Int<BlockSize / CopyWidth>{}, Int<CopyWidth>{}));
+    return make_tiled_copy(CopyAtom, thread_layout, value_layout);
+}
 
 /** POV Shuffle - Single iteration Kernel
  *
@@ -72,7 +72,9 @@ __global__ void povs_kernel(
     using namespace cute;
     const uint vblock_id = blockIdx.x;
     const int seed = Sg_ptr[vblock_id];
-    // auto tiled_copy = get_tiled_copy<DType, get_cuda_arch(), BlockSize>();
+
+    auto copy_tiler = get_tiled_copy<DType, get_cuda_arch(), BlockSize>();
+    auto thr_copy_tiler = copy_tiler.get_slice(threadIdx.x);
 
     // Reusable layouts
     auto pblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}));
@@ -91,7 +93,7 @@ __global__ void povs_kernel(
     copy(bAr, bAg);                                    // Copy from global device mem to registers
 
     // ### Stage 1 ###
-    // Vectorized copy of target instances from global device mem to SM shared memory
+    // Vectorized predicated copy of assigned physical blocks from global device mem to SM shared memory
 
     // Block-owned data instances tensor in shared SM memory
     __shared__ DType bXs_ptr[size(vblock_layout)];
@@ -131,8 +133,19 @@ __global__ void povs_kernel(
             return pblock_pred[coord] && iid_in_pblk >= head_length; // Guard against over-indexing and ignore head instances
         });
 
-        // Copy bXg_pblk to bXs[:,:head_length,pbid_in_vblk] where predicate bXg_pblk_pred allows, vectorizing by a thread layout
-        // Copy bXg_pblk_tail to bXs[:,head_length:,pbid_in_vblk] where predicate bXg_pblk_tail_pred allows, vectorizing by a thread layout
+        // Vectorized, predicated copy head and tail from global device memory to shared SM memory
+        copy_if(
+            copy_tiler,
+            bXg_pblk_head_pred,
+            thr_copy_tiler.partition_S(bXg_pblk_head),
+            thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
+        );
+        copy_if(
+            copy_tiler,
+            bXg_pblk_tail_pred,
+            thr_copy_tiler.partition_S(bXg_pblk_tail),
+            thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
+        );
     }
 
     // ### Stage 2 ###
