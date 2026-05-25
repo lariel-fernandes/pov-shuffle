@@ -74,21 +74,12 @@ __global__ void povs_kernel(
     const int seed = Sg_ptr[vblock_id];
     // auto tiled_copy = get_tiled_copy<DType, get_cuda_arch(), BlockSize>();
 
-    // Block-owned assignments tensor in global device memory with shape (VBlockSize,).
+    // Block-owned assignment tensors in global device mem and register mem, respectively, both with shape (VBlockSize,).
     // Each position `i` contains the index of the assigned physical block, or -1 if padding.
     auto bAg = make_tensor(Ag_ptr + (VBlockSize * vblock_id), make_layout(make_shape(Int<VBlockSize>{})));
-
-    // Block-owned assignments tensor in register memory with shape (VBlockSize,).
     auto bAr = make_fragment_like(bAg);
     for (int i = 0; i < VBlockSize; ++i)
         bAr[i] = bAg[i];
-
-    if (thread0()) {
-        printf("vblock_id: %d, seed: %d, assignments: ", vblock_id, seed);
-        for (int i = 0; i < VBlockSize; ++i)
-            printf("%ld ", bAr[i]);
-        printf("\n");
-    }
 
     // Block-owned data instances tensor in shared SM memory, Col-major with shape (InstanceSize, PBlockSize, VBlockSize).
     __shared__ DType bXs_ptr[size(InstanceSize * PBlockSize * VBlockSize)];
@@ -119,13 +110,10 @@ __global__ void povs_kernel(
         const auto iid_start = pbid * PBlockSize;                     // Global instance ID that is the start of the assigned pblock
         auto oiid_start = iid_start + offset;                         // Offset global instance ID that is the start of the assigned pblock
         if (oiid_start >= num_instances) oiid_start -= num_instances; // Wrap around to compensate the offset
-        const auto tail_length =
-            max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)
-            );                                             // Number of instances in the pblock that go over the wrap around
+        const auto tail_length = max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Wrapped around pblock instances
         const auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
 
-        // Block-owned data instances tensor in global device memory, local partitioned for that pblock, with shape (InstanceSize,
-        // PBlockSize).
+        // Block-owned data instances tensor in global device mem, local partitioned for that pblock, with shape (InstanceSize, PBlockSize).
         auto bXg_pblk = make_tensor(Xg_ptr + (oiid_start * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
         auto bXg_pblk_pred = lazy::transform(make_identity_tensor(bXg_pblk.shape()), [&](auto coord) {
             const auto iid_in_pblk = get<1>(coord);       // instance id within pblock
