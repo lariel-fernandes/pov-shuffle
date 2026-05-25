@@ -36,19 +36,19 @@ template <typename DType, int CudaArch, int BitWidth>
 constexpr auto __device__ get_copy_atom()
 {
     using namespace cute;
-    if constexpr (CudaArch >= 800) return Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<uint_bit_t<BitWidth>>, DType>{};
-    return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
+    if constexpr (CudaArch >= 800 && BitWidth >= 32) return Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<uint_bit_t<BitWidth>>, DType>{};
+    else return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
 }
 
-template <typename DType, int CudaArch, int BlockSize>
+template <typename DType, int CudaArch, int BlockSize, int InstanceSize>
 auto __device__ get_tiled_copy()
 {
     using namespace cute;
-    constexpr int BitWidth = 128;
+    constexpr int InstanceBits = InstanceSize * static_cast<int>(sizeof(DType)) * 8;
+    constexpr int BitWidth = InstanceBits >= 128 ? 128 : InstanceBits >= 64 ? 64 : InstanceBits >= 32 ? 32 : 16;
     constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
     constexpr auto CopyAtom = get_copy_atom<DType, CudaArch, BitWidth>();
     auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
-    // TODO: consider using a flat shape when the instance size is 1
     auto thread_layout = make_layout(make_shape(Int<BlockSize / CopyWidth>{}, Int<CopyWidth>{}));
     return make_tiled_copy(CopyAtom, thread_layout, value_layout);
 }
@@ -73,7 +73,7 @@ __global__ void povs_kernel(
     const uint vblock_id = blockIdx.x;
     const int seed = Sg_ptr[vblock_id];
 
-    auto copy_tiler = get_tiled_copy<DType, get_cuda_arch(), BlockSize>();
+    auto copy_tiler = get_tiled_copy<DType, get_cuda_arch(), BlockSize, InstanceSize>();
     auto thr_copy_tiler = copy_tiler.get_slice(threadIdx.x);
 
     // Reusable layouts
@@ -90,7 +90,7 @@ __global__ void povs_kernel(
     auto Ag = make_tensor(Ag_ptr, assignments_layout); // Global device memory
     auto bAg = Ag(_, vblock_id);                       // Block-owned in global device mem
     auto bAr = make_fragment_like(bAg);                // Block-owned in registers
-    copy(bAr, bAg);                                    // Copy from global device mem to registers
+    copy(bAg, bAr);                                    // Copy from global device mem to registers
 
     // ### Stage 1 ###
     // Vectorized predicated copy of assigned physical blocks from global device mem to SM shared memory

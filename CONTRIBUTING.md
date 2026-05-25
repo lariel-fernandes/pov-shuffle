@@ -5,6 +5,8 @@ device code:
 - [ ] Allocate smem cute tensor in kernel using formula from the template variables
 - [ ] Do vectorized copy and thread0 shuffling
 - [ ] Implement Fisher-Yates shuffle of a CUTE tensor for the device
+optimizations:
+- [ ] Consider using a flat vector copy layout when instance size is 1
 evaluation:
 - [ ] do some plot that compares against a standard local block shuffle!
 - [ ] add the exercise of breaking point by dataset size
