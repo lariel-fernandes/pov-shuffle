@@ -58,7 +58,7 @@ auto __device__ get_tiled_copy()
  *  Each GPU program block maps to a single virtual Block through `blockIdx.x`
  *  Each virtual block maps to `VBlockSize` physical blocks through the `V` mapping
  */
-template <typename DType, int PBlockSize, int VBlockSize, int InstanceSize>
+template <typename DType, int PBlockSize, int VBlockSize, int InstanceSize, int BlockSize>
 __global__ void povs_kernel(
     const DType* Xg_ptr, // Instances to shuffle in place - Global device memory pointer.
                          // Col-major (InstanceSize, num_instances)
@@ -69,6 +69,81 @@ __global__ void povs_kernel(
     const long num_instances
 )
 {
+    using namespace cute;
+    const uint vblock_id = blockIdx.x;
+    const int seed = Sg_ptr[vblock_id];
+    auto tiled_copy = get_tiled_copy<DType, get_cuda_arch(), BlockSize>();
+
+    // Block-owned assignments tensor in global device memory with shape (VBlockSize,).
+    // Each position `i` contains the index of the assigned physical block, or -1 if padding.
+    auto bAg = make_tensor(Ag_ptr + (VBlockSize * vblock_id), make_layout(make_shape(Int<VBlockSize>{})));
+
+    // Block-owned assignments tensor in register memory with shape (VBlockSize,).
+    auto bAr = make_fragment_like(bAg);
+    if (threadIdx.x < bAr.size()) bAr[threadIdx.x] = bAg[threadIdx.x];
+
+    // Block-owned data instances tensor in shared SM memory, Col-major with shape (InstanceSize, PBlockSize, VBlockSize).
+    __shared__ DType bXs_ptr[size(InstanceSize * PBlockSize * VBlockSize)];
+    auto bXs = make_tensor(make_smem_ptr(bXs_ptr), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}, Int<VBlockSize>{})));
+
+    // Block-owned permutation index tensor in shared SM memory with shape (PBlockSize * VBlockSize,).
+    // Finding the value `j` at position `i` means that bXs[:,j] should travel to bXg[:,i] as the result of shuffling.
+    __shared__ int bIs_ptr[size(PBlockSize * VBlockSize)];
+    auto bIs = make_tensor(make_smem_ptr(bIs_ptr), make_layout(make_shape(Int<PBlockSize * VBlockSize>{})));
+
+    // Define predicate of block-owned data instances
+    auto bXp = lazy::transform(bXs, [&](auto coord) {
+        const auto iid_in_pblk = coord[1]; // instance id within pblock
+        const auto pbid_in_vblk = coord[2]; // pblock id within vblock
+        const auto pbid = bAr[pbid_in_vblk]; // Global pblock id that was assigned to this vblock
+        const auto iid = pbid * PBlockSize + iid_in_pblk;  // Global instance ID that is part of that pblock
+        if (pbid == -1) return false; // Check for assignment padding
+        if (iid >= num_instances) return false; // Check for instance over-indexing in the last pblock
+        return true;
+    });
+
+    // For each pblock id within this vblock
+    for (int pbid_in_vblk = 0; pbid_in_vblk < VBlockSize; ++pbid_in_vblk) {
+        const auto pbid = bAr[pbid_in_vblk]; // Global pblock id that was assigned to this vblock
+        if (pbid == -1) continue; // Skip for assignment padding
+
+        // Pblock start and wrap around arithmetic
+        auto iid_start = pbid * PBlockSize; // Global instance ID that is the start of the assigned pblock
+        auto oiid_start = iid_start + offset; // Offset global instance ID that is the start of the assigned pblock
+        if (oiid_start >= num_instances) oiid_start -= num_instances; // Wrap around to compensate the offset
+        auto tail_length = PBlockSize - (num_instances - oiid_start); // Number of instances in the pblock that go over the wrap around
+        auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
+
+        // Block-owned data instances tensor in global device memory, local partitioned for that pblock, with shape (InstanceSize, PBlockSize).
+        auto bXg_pblk = make_tensor(Xg_ptr + (oiid_start * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
+        auto bXg_pblk_pred = lazy::transform(bXg_pblk, [&](auto coord) {
+            const auto iid_in_pblk = coord[1]; // instance id within pblock
+            const auto iid = iid_start + iid_in_pblk; // Global instance ID that is part of that pblock
+            if (iid >= num_instances) return false; // Check for instance over-indexing in the last pblock
+            if (iid_in_pblk >= head_length) return false; // Check if instance is part of the pblock tail that goes over the wrap around
+            return true;
+        });
+
+        // Tail of bXg_pblk that goes over the wrap around
+        auto bXg_pblk_tail = make_tensor(Xg_ptr + (tail_length * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
+        auto bXg_pblk_tail_pred = lazy::transform(bXg_pblk_tail, [&](auto coord) {
+            const auto iid_in_pblk = coord[1]; // instance id within pblock
+            if (iid_in_pblk < head_length) return false; // Check if instance is part of the pblock head that is before the wrap around
+            return true;
+        });
+
+        // DEBUG: disable the assignment shuffle so we know the assignments of the first vblock, then print here the values of head and tail that would be copied
+        //        manipulate assignments to check what happens in the padding and boundary conditions
+
+        // Copy bXg_pblk to bXs[:,:head_length,pbid_in_vblk] where predicate bXg_pblk_pred allows, vectorizing by a thread layout
+        // Copy bXg_pblk_tail to bXs[:,head_length:,pbid_in_vblk] where predicate bXg_pblk_tail_pred allows, vectorizing by a thread layout
+    }
+
+    // Data instances tensor in global device memory, Col-major with shape (InstanceSize, num_instances)
+    auto Xg = make_tensor(Xg_ptr, make_layout(make_shape(Int<InstanceSize>{}, num_instances)));
+
+    // Partition bIs into tIs, initialize with identity using address diff from pointer start, let threadId.x == 0 shuffle bIs in place with seed (possibly pass the tensor's pointer to __host__ __device__ shuffle)
+    // Use the same ptr diff arith to map writing bXs[:,[i]] to bXg_pblock[:,offset_wrap_around(i)]
 }
 
 /** Host-side helper functions */
@@ -134,7 +209,7 @@ void povs_cuda(
 
             // GPU program block arithmetic
             const int num_blocks = num_pblocks;
-            constexpr int block_size = get_block_size<kCudaArch>();
+            constexpr int BlockSize = get_block_size<kCudaArch>();
 
             long offset = 0l; // Declare variable before the CUDA status check macros
                               // to avoid `error: transfer of control bypasses initialization of ...`
@@ -155,8 +230,8 @@ void povs_cuda(
             offset = Oh_ptr[offset_dist(rng)];
 
             // Submit kernel
-            (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize>
-             <<<num_blocks, block_size>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
+            (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize, BlockSize>
+             <<<num_blocks, BlockSize>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
 
             lambda_completed = true; // If we reached this point, the lambda executed successfully
         end_lambda:
