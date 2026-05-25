@@ -80,7 +80,8 @@ __global__ void povs_kernel(
 
     // Block-owned assignments tensor in register memory with shape (VBlockSize,).
     auto bAr = make_fragment_like(bAg);
-    for (int i = 0; i < VBlockSize; ++i) bAr[i] = bAg[i];
+    for (int i = 0; i < VBlockSize; ++i)
+        bAr[i] = bAg[i];
 
     if (thread0()) {
         printf("vblock_id: %d, seed: %d, assignments: ", vblock_id, seed);
@@ -100,43 +101,47 @@ __global__ void povs_kernel(
 
     // Define predicate of block-owned data instances
     auto bXp = lazy::transform(make_identity_tensor(bXs.shape()), [&](auto coord) {
-        const auto iid_in_pblk = get<1>(coord); // instance id within pblock
-        const auto pbid_in_vblk = get<2>(coord); // pblock id within vblock
-        const auto pbid = bAr[pbid_in_vblk]; // Global pblock id that was assigned to this vblock
-        const auto iid = pbid * PBlockSize + iid_in_pblk;  // Global instance ID that is part of that pblock
-        if (pbid == -1) return false; // Check for assignment padding
-        if (iid >= num_instances) return false; // Check for instance over-indexing in the last pblock
+        const auto iid_in_pblk = get<1>(coord);           // instance id within pblock
+        const auto pbid_in_vblk = get<2>(coord);          // pblock id within vblock
+        const auto pbid = bAr[pbid_in_vblk];              // Global pblock id that was assigned to this vblock
+        const auto iid = pbid * PBlockSize + iid_in_pblk; // Global instance ID that is part of that pblock
+        if (pbid == -1) return false;                     // Check for assignment padding
+        if (iid >= num_instances) return false;           // Check for instance over-indexing in the last pblock
         return true;
     });
 
     // For each pblock id within this vblock
     for (int pbid_in_vblk = 0; pbid_in_vblk < VBlockSize; ++pbid_in_vblk) {
         const auto pbid = bAr[pbid_in_vblk]; // Global pblock id that was assigned to this vblock
-        if (pbid == -1) continue; // Skip for assignment padding
+        if (pbid == -1) continue;            // Skip for assignment padding
 
         // Pblock start and wrap around arithmetic
-        const auto iid_start = pbid * PBlockSize; // Global instance ID that is the start of the assigned pblock
-        auto oiid_start = iid_start + offset; // Offset global instance ID that is the start of the assigned pblock
+        const auto iid_start = pbid * PBlockSize;                     // Global instance ID that is the start of the assigned pblock
+        auto oiid_start = iid_start + offset;                         // Offset global instance ID that is the start of the assigned pblock
         if (oiid_start >= num_instances) oiid_start -= num_instances; // Wrap around to compensate the offset
-        const auto tail_length = max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Number of instances in the pblock that go over the wrap around
+        const auto tail_length =
+            max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)
+            );                                             // Number of instances in the pblock that go over the wrap around
         const auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
 
-        // Block-owned data instances tensor in global device memory, local partitioned for that pblock, with shape (InstanceSize, PBlockSize).
+        // Block-owned data instances tensor in global device memory, local partitioned for that pblock, with shape (InstanceSize,
+        // PBlockSize).
         auto bXg_pblk = make_tensor(Xg_ptr + (oiid_start * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
         auto bXg_pblk_pred = lazy::transform(make_identity_tensor(bXg_pblk.shape()), [&](auto coord) {
-            const auto iid_in_pblk = get<1>(coord); // instance id within pblock
-            const auto iid = iid_start + iid_in_pblk; // Global instance ID that is part of that pblock
-            if (iid >= num_instances) return false; // Check for instance over-indexing in the last pblock
+            const auto iid_in_pblk = get<1>(coord);       // instance id within pblock
+            const auto iid = iid_start + iid_in_pblk;     // Global instance ID that is part of that pblock
+            if (iid >= num_instances) return false;       // Check for instance over-indexing in the last pblock
             if (iid_in_pblk >= head_length) return false; // Check if instance is part of the pblock tail that goes over the wrap around
             return true;
         });
 
         // Tail of bXg_pblk that goes over the wrap around
-        auto bXg_pblk_tail = make_tensor(Xg_ptr - (head_length * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
+        auto bXg_pblk_tail =
+            make_tensor(Xg_ptr - (head_length * InstanceSize), make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{})));
         auto bXg_pblk_tail_pred = lazy::transform(make_identity_tensor(bXg_pblk_tail.shape()), [&](auto coord) {
-            const auto iid_in_pblk = get<1>(coord); // instance id within pblock
-            const auto iid = iid_start + iid_in_pblk; // Global instance ID that is part of that pblock
-            if (iid >= num_instances) return false; // Check for instance over-indexing in the last pblock
+            const auto iid_in_pblk = get<1>(coord);      // instance id within pblock
+            const auto iid = iid_start + iid_in_pblk;    // Global instance ID that is part of that pblock
+            if (iid >= num_instances) return false;      // Check for instance over-indexing in the last pblock
             if (iid_in_pblk < head_length) return false; // Check if instance is part of the pblock head that is before the wrap around
             return true;
         });
@@ -148,8 +153,9 @@ __global__ void povs_kernel(
     // Data instances tensor in global device memory, Col-major with shape (InstanceSize, num_instances)
     auto Xg = make_tensor(Xg_ptr, make_layout(make_shape(Int<InstanceSize>{}, num_instances)));
 
-    // Partition bIs into tIs, initialize with identity using address diff from pointer start, let threadId.x == 0 shuffle bIs in place with seed (possibly pass the tensor's pointer to __host__ __device__ shuffle)
-    // Use the same ptr diff arith to map writing bXs[:,[i]] to bXg_pblock[:,offset_wrap_around(i)]
+    // Partition bIs into tIs, initialize with identity using address diff from pointer start, let threadId.x == 0 shuffle bIs in place with
+    // seed (possibly pass the tensor's pointer to __host__ __device__ shuffle) Use the same ptr diff arith to map writing bXs[:,[i]] to
+    // bXg_pblock[:,offset_wrap_around(i)]
 }
 
 /** Host-side helper functions */
