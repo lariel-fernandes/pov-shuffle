@@ -2,7 +2,6 @@
 ## Tasks
 device code:
 - [ ] Investigate sequence of zeroes after the first 16 elements
-- [ ] Adjust variable names, comments and documentation to facilitate the mental model
 cuda optimizations:
 - [ ] check whether flat_comp_tiler is partitioning the computation evenly across threads
 - [ ] Use vector copy for large instances
