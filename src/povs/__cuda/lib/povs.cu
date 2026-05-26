@@ -177,7 +177,7 @@ __global__ void povs_kernel(
     auto bIi = make_identity_tensor(shape(bIs));                          // Block-owned lazy identity tensor
     auto tIs = local_partition(bIs, flat_comp_tiler, threadIdx.x);        // Thread-owned tensor in SM shared memory
     auto tIi = local_partition(bIi, flat_comp_tiler, threadIdx.x);        // Thread-owned lazy identity tensor in SM
-    copy(bIi, bIs);                                                       // Parallel initialize permutation index with identity
+    copy(tIi, tIs);                                                       // Parallel initialize permutation index with identity
 
     // Block-owned (lazy) permutation index predicate
     auto bIp = lazy::transform(bIi, [&](auto coord) {
@@ -189,6 +189,7 @@ __global__ void povs_kernel(
         if (iid >= num_instances) return false;           // Guard against instance over-indexing in the last physical block
         return true;
     });
+    auto tIp = local_partition(bIs, flat_comp_tiler, threadIdx.x); // Thread-owned (lazy) permutation index predicate
 
     // Find the last valid index (inclusive) in the permutation index tensor, which determines the boundary for the Fisher-Yates shuffle
     int shuffle_boundary = 0;
@@ -214,23 +215,23 @@ __global__ void povs_kernel(
     // ### Stage 3 ###
     // Parallel write permutated instances from shared SM memory back to mapped positions in global device memory
 
-    // Define predicate of block-owned data instances
-    auto bXp = lazy::transform(vblock_identity, [&](auto coord) {
-        const auto iid_in_pblk = get<1>(coord);           // instance id within pblock
-        const auto pbid_in_vblk = get<2>(coord);          // pblock id within vblock
-        const auto pbid = bAr[pbid_in_vblk];              // Global pblock id that was assigned to this vblock
-        const auto iid = pbid * PBlockSize + iid_in_pblk; // Global instance ID that is part of that pblock
-        if (pbid == -1) return false;                     // Check for assignment padding
-        if (iid >= num_instances) return false;           // Check for instance over-indexing in the last pblock
-        return true;
-    });
+    for (int i = 0; i <= tIs.size(); ++i) {
+        if (!tIp[i]) continue;                   // Guard against the shuffle boundary
+        const auto iid_in_vblk = tIs[i];         // Instance ID within the flattened virtual block
+        const auto src_coord = bIi[iid_in_vblk]; // Source: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to read from bXs
+        const auto dst_coord = tIi[i]; // Destination: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to write in Xg_ptr
 
-    // Data instances tensor in global device memory, Col-major with shape (InstanceSize, num_instances)
-    auto Xg = make_tensor(Xg_ptr, make_layout(make_shape(Int<InstanceSize>{}, num_instances)));
+        // Destination pointer arithmetic
+        const int iid_in_pblk = get<0>(src_coord);        // Instance ID within physical block
+        const int pbid_in_vblk = get<1>(src_coord);       // Physical bock ID within virtual block
+        const int pbid = bAr[pbid_in_vblk];               // Global physical block ID
+        const auto iid = pbid * PBlockSize + iid_in_pblk; // Global target instance ID
+        auto oiid = iid + offset;                         // Offset global target instance ID
+        if (oiid >= num_instances) oiid -= num_instances; // Wrap around to compensate the offset
 
-    // Partition bIs into tIs, initialize with identity using address diff from pointer start, let threadId.x == 0 shuffle bIs in place with
-    // seed (possibly pass the tensor's pointer to __host__ __device__ shuffle) Use the same ptr diff arith to map writing bXs[:,[i]] to
-    // bXg_pblock[:,offset_wrap_around(i)]
+        Xg_ptr[oiid * InstanceSize] = bXs(prepend(src_coord, _)); // Write whole instance at position
+        // TODO: consider using a single threaded vectorized copy atom for 128-bit buffer copying of large instances
+    }
 }
 
 /** Host-side helper functions */

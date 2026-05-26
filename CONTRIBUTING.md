@@ -1,10 +1,7 @@
 
 ## Tasks
 device code:
-- [ ] Define CUTE tensors in kernel, using lazy transform with the offset and wrap around logic
-- [ ] Allocate smem cute tensor in kernel using formula from the template variables
-- [ ] Do vectorized copy and thread0 shuffling
-- [ ] Implement Fisher-Yates shuffle of a CUTE tensor for the device
+- [ ] Copy back to global mem with index to coordinate mapping, then coordinate to memory space
 optimizations:
 - [ ] Consider using a flat vector copy layout when instance size is 1
 evaluation:
