@@ -7,10 +7,18 @@
 
 #include "./utils.h"
 
+/** Constants */
+#pragma region Constants
+
 // Closed-open interval for sampling a numerical seed from a distribution.
 // Aligned with the respective constants in the Python module `povs.constants` for reproducibility.
 static constexpr int MIN_SEED = 1;
 static constexpr int MAX_SEED = 1000;
+
+#pragma endregion
+
+/** Macros */
+#pragma region Macros
 
 // clang-format off
 #define DISPATCH_CUDA_ARCH(cuda_arch, lambda) \
@@ -21,7 +29,10 @@ static constexpr int MAX_SEED = 1000;
     }()
 // clang-format on
 
+#pragma endregion
+
 /** Device-side helper functions */
+#pragma region Device helper functions
 
 constexpr int __device__ get_cuda_arch()
 {
@@ -55,10 +66,15 @@ auto __device__ get_tiled_copy()
     return make_tiled_copy(CopyAtom, thread_layout, value_layout);
 }
 
+#pragma endregion
+
+/** CUDA Kernel */
+#pragma region CUDA Kernel
+
 /** POV Shuffle - Single iteration Kernel
  *
  *  Each GPU program block maps to a single virtual Block through `blockIdx.x`
- *  Each virtual block maps to `VBlockSize` physical blocks through the `V` mapping
+ *  Each virtual block maps to `VBlockSize` physical blocks through the `A` mapping
  */
 template <typename DType, int PBlockSize, int VBlockSize, int InstanceSize, int BlockSize>
 __global__ void povs_kernel(
@@ -80,101 +96,115 @@ __global__ void povs_kernel(
     auto thr_copy_tiler = copy_tiler.get_slice(threadIdx.x);
 
     // Define reusable layouts
-    auto pblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}));
-    auto vblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}, Int<VBlockSize>{}));
-    auto vblock_coarse_layout = take<1, 3>(vblock_layout); // vblock_layout without the instance dimension
-    auto flat_comp_tiler =
-        make_layout(make_shape(Int<BlockSize>{})); // GPU threads-block layout for partitioning the computation of flat tensors
+#pragma region Layouts
+    // Hierarchy: Virtual block contains physical blocks, which contain instances, which are treated as contiguous 1-D vectors, regardless
+    // of their original shape. The shuffle operates on the instances, keeping each instance intact but changing their order.
+    auto instance_layout = make_layout(make_shape(Int<InstanceSize>{})); // Layout of a single instance
+    auto pblock_data_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}));
+    auto vblock_data_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}, Int<VBlockSize>{}));
+    auto vblock_instances_layout = make_layout(make_shape(Int<PBlockSize>{}, Int<VBlockSize>{}));
+    auto flat_comp_tiler = make_layout(make_shape(Int<BlockSize>{})); // Thread-block layout for partitioning computation
+#pragma endregion
 
-    // Define assignment tensors and copy to registers for fast access
+    // Block-owned data instances tensor in shared SM memory
+    __shared__ DType bXs_ptr[size(vblock_data_layout)];
+    auto bXs = make_tensor(make_smem_ptr(bXs_ptr), vblock_data_layout);
+
+    // ### Stage 0 ###
+    // Copy this vblock's assignment map to registers for fast access and sort the assignments
+#pragma region Stage 0
     auto bAg = make_tensor(Ag_ptr + vblock_id * VBlockSize, make_shape(Int<VBlockSize>{})); // Block-owned in global device mem
     auto bAr = make_fragment_like(bAg);                                                     // Block-owned in registers
     copy(bAg, bAr);                                                                         // Copy from global device mem to registers
 
-    // Sort bAr ascending, treating -1 (padding) as +infinity so it sinks to the end.
-    // Guarantees the truncated last pblock (highest ID, if assigned here) lands at the last valid slot,
-    // keeping the permutation index gap-free for the Fisher-Yates shuffle in Stage 2.
-    for (int i = 1; i < VBlockSize; ++i) {
-        long key = bAr[i];
-        int j = i - 1;
-        while (j >= 0 && key != -1 && (bAr[j] == -1 || bAr[j] > key)) {
-            bAr[j + 1] = bAr[j];
-            --j;
+    // Sort bAr ascending
+    {
+        // Treating -1 (padding) as +infinity so it sinks to the end.
+        // Guarantees the truncated last pblock (highest ID, if assigned here) lands at the last valid slot,
+        // keeping the permutation index gap-free for the Fisher-Yates shuffle in Stage 2.
+        for (int i = 1; i < VBlockSize; ++i) {
+            long key = bAr[i];
+            int j = i - 1;
+            while (j >= 0 && key != -1 && (bAr[j] == -1 || bAr[j] > key)) {
+                bAr[j + 1] = bAr[j];
+                --j;
+            }
+            bAr[j + 1] = key;
         }
-        bAr[j + 1] = key;
     }
+#pragma endregion
 
     // ### Stage 1 ###
     // Vectorized predicated copy of assigned physical blocks from global device mem to SM shared memory
+    {
+        auto pblock_identity = make_identity_tensor(shape(pblock_data_layout)); // Physical block identity
 
-    // Block-owned data instances tensor in shared SM memory
-    __shared__ DType bXs_ptr[size(vblock_layout)];
-    auto bXs = make_tensor(make_smem_ptr(bXs_ptr), vblock_layout);
+        // For each pblock id within this vblock
+        for (int pbid_in_vblk = 0; pbid_in_vblk < VBlockSize; ++pbid_in_vblk) {
+            const auto pbid = bAr[pbid_in_vblk]; // Global pblock id that was assigned to this vblock
+            if (pbid == -1) continue;            // Skip for assignment padding
 
-    auto pblock_identity = make_identity_tensor(shape(pblock_layout)); // Physical block identity
+            // Pblock start and wrap around arithmetic
+            const auto iid_start = pbid * PBlockSize; // Global instance ID that is the start of the assigned pblock
+            auto oiid_start = iid_start + offset;     // Offset global instance ID that is the start of the assigned pblock
+            if (oiid_start >= num_instances) oiid_start -= num_instances; // Wrap around to compensate the offset
+            const auto tail_length =
+                max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Wrapped around pblock instances
+            const auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
 
-    // For each pblock id within this vblock
-    for (int pbid_in_vblk = 0; pbid_in_vblk < VBlockSize; ++pbid_in_vblk) {
-        const auto pbid = bAr[pbid_in_vblk]; // Global pblock id that was assigned to this vblock
-        if (pbid == -1) continue;            // Skip for assignment padding
+            // Base predicate to prevent instance over-indexing in the last physical block
+            auto pblock_pred = lazy::transform(pblock_identity, [&](auto coord) {
+                const auto iid_in_pblk = get<1>(coord);   // instance id within pblock
+                const auto iid = iid_start + iid_in_pblk; // Global instance ID that is part of that pblock
+                return iid < num_instances;
+            });
 
-        // Pblock start and wrap around arithmetic
-        const auto iid_start = pbid * PBlockSize;                     // Global instance ID that is the start of the assigned pblock
-        auto oiid_start = iid_start + offset;                         // Offset global instance ID that is the start of the assigned pblock
-        if (oiid_start >= num_instances) oiid_start -= num_instances; // Wrap around to compensate the offset
-        const auto tail_length = max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Wrapped around pblock instances
-        const auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
+            // Block-owned data instances tensors in global device mem, local partitioned for that pblock, with shape (InstanceSize,
+            // PBlockSize) For the pblock that goes over the wrap around, the head and tail point to the instances before and after the
+            // wrap, respectively.
+            auto bXg_pblk_head = make_tensor(Xg_ptr + (oiid_start * InstanceSize), pblock_data_layout);
+            auto bXg_pblk_tail = make_tensor(Xg_ptr - (head_length * InstanceSize), pblock_data_layout);
 
-        // Base predicate to prevent instance over-indexing in the last physical block
-        auto pblock_pred = lazy::transform(pblock_identity, [&](auto coord) {
-            const auto iid_in_pblk = get<1>(coord);   // instance id within pblock
-            const auto iid = iid_start + iid_in_pblk; // Global instance ID that is part of that pblock
-            return iid < num_instances;
-        });
+            // Define predicates for the head and tail, guarding against over-indexing in each case
+            auto bXg_pblk_head_pred = lazy::transform(pblock_identity, [&](auto coord) {
+                const auto iid_in_pblk = get<1>(coord);                 // instance id within pblock
+                return pblock_pred[coord] && iid_in_pblk < head_length; // Guard against over-indexing and ignore tail instances
+            });
+            auto bXg_pblk_tail_pred = lazy::transform(pblock_identity, [&](auto coord) {
+                const auto iid_in_pblk = get<1>(coord);                  // instance id within pblock
+                return pblock_pred[coord] && iid_in_pblk >= head_length; // Guard against over-indexing and ignore head instances
+            });
 
-        // Block-owned data instances tensors in global device mem, local partitioned for that pblock, with shape (InstanceSize, PBlockSize)
-        // For the pblock that goes over the wrap around, the head and tail point to the instances before and after the wrap, respectively.
-        auto bXg_pblk_head = make_tensor(Xg_ptr + (oiid_start * InstanceSize), pblock_layout);
-        auto bXg_pblk_tail = make_tensor(Xg_ptr - (head_length * InstanceSize), pblock_layout);
-
-        // Define predicates for the head and tail, guarding against over-indexing in each case
-        auto bXg_pblk_head_pred = lazy::transform(pblock_identity, [&](auto coord) {
-            const auto iid_in_pblk = get<1>(coord);                 // instance id within pblock
-            return pblock_pred[coord] && iid_in_pblk < head_length; // Guard against over-indexing and ignore tail instances
-        });
-        auto bXg_pblk_tail_pred = lazy::transform(pblock_identity, [&](auto coord) {
-            const auto iid_in_pblk = get<1>(coord);                  // instance id within pblock
-            return pblock_pred[coord] && iid_in_pblk >= head_length; // Guard against over-indexing and ignore head instances
-        });
-
-        // Vectorized, predicated copy head and tail from global device memory to shared SM memory
-        // clang-format off
-        copy_if(
-            copy_tiler,
-            bXg_pblk_head_pred,
-            thr_copy_tiler.partition_S(bXg_pblk_head),
-            thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
-        );
-        copy_if(
-            copy_tiler,
-            bXg_pblk_tail_pred,
-            thr_copy_tiler.partition_S(bXg_pblk_tail),
-            thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
-        );
+            // Vectorized, predicated copy head and tail from global device memory to shared SM memory
+            // clang-format off
+            copy_if(
+                copy_tiler,
+                bXg_pblk_head_pred,
+                thr_copy_tiler.partition_S(bXg_pblk_head),
+                thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
+            );
+            copy_if(
+                copy_tiler,
+                bXg_pblk_tail_pred,
+                thr_copy_tiler.partition_S(bXg_pblk_tail),
+                thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
+            );
+        }
+        cp_async_fence(); cp_async_wait<0>(); __syncthreads(); // Sync on shared mem writes (possibly with streaming depending on copy atom)
+        // clang-format on
     }
-    cp_async_fence(); cp_async_wait<0>(); __syncthreads(); // Sync on shared mem writes (possibly with streaming writes depending on copy atom)
-    // clang-format on
 
     // ### Stage 2 ###
     // Generate permutation index in shared SM memory (populate with identity in parallel, then run a single-threaded shuffle)
+#pragma region Stage 2
 
     // Permutation index tensor
-    __shared__ int bIs_ptr[size(vblock_coarse_layout)];                   // Block-owned shared mem pointer
-    auto bIs = make_tensor(make_smem_ptr(bIs_ptr), vblock_coarse_layout); // Block-owned tensor in SM shared memory
-    auto bIi = make_identity_tensor(shape(bIs));                          // Block-owned lazy identity tensor
-    auto tIs = local_partition(bIs, flat_comp_tiler, threadIdx.x);        // Thread-owned tensor in SM shared memory
-    auto tIi = local_partition(bIi, flat_comp_tiler, threadIdx.x);        // Thread-owned lazy identity tensor in SM
-    for (int i = 0; i < size(tIs); ++i)                                   // Parallel initialize permutation index with flat identity
+    __shared__ int bIs_ptr[size(vblock_instances_layout)];                   // Block-owned shared mem pointer
+    auto bIs = make_tensor(make_smem_ptr(bIs_ptr), vblock_instances_layout); // Block-owned tensor in SM shared memory
+    auto bIi = make_identity_tensor(shape(bIs));                             // Block-owned lazy identity tensor
+    auto tIs = local_partition(bIs, flat_comp_tiler, threadIdx.x);           // Thread-owned tensor in SM shared memory
+    auto tIi = local_partition(bIi, flat_comp_tiler, threadIdx.x);           // Thread-owned lazy identity tensor in SM
+    for (int i = 0; i < size(tIs); ++i)                                      // Parallel initialize permutation index with flat identity
         tIs[i] = bIs.layout()(tIi[i]); // layout(coord) → linear offset = the flat integer index we want
 
     __syncthreads(); // Sync on shared mem writes
@@ -193,56 +223,66 @@ __global__ void povs_kernel(
 
     // Find the last valid index (inclusive) in the permutation index tensor, which determines the boundary for the Fisher-Yates shuffle
     int shuffle_boundary = 0;
-    for (int i = size(bIs) - 1; i >= 0; --i) {
-        if (bIp[i]) {
-            shuffle_boundary = i;
-            break;
+    {
+        for (int i = size(bIs) - 1; i >= 0; --i) {
+            if (bIp[i]) {
+                shuffle_boundary = i;
+                break;
+            }
         }
     }
 
     // Fisher-Yates shuffle of the permutation index in shared SM memory
-    // clang-format off
-    if (threadIdx.x == 0) {
-        auto rng = static_cast<uint32_t>(seed);
-        for (int i = 0; i <= shuffle_boundary; ++i) {
-            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;                                                 // xorshift32
-            const int j = i + static_cast<int>((static_cast<uint64_t>(rng) * (shuffle_boundary - i + 1)) >> 32); // Lemire fast range
-            int temp = bIs[i];
-            bIs[i] = bIs[j];
-            bIs[j] = temp;
+    {
+        // clang-format off
+        if (threadIdx.x == 0) {
+            auto rng = static_cast<uint32_t>(seed);
+            for (int i = 0; i <= shuffle_boundary; ++i) {
+                rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;                                                 // xorshift32
+                const int j = i + static_cast<int>((static_cast<uint64_t>(rng) * (shuffle_boundary - i + 1)) >> 32); // Lemire fast range
+                int temp = bIs[i];
+                bIs[i] = bIs[j];
+                bIs[j] = temp;
+            }
         }
+        // clang-format on
     }
-    // clang-format on
 
     __syncthreads(); // Have other threads wait for the thread 0 to finish writing the permutated indices in shared memory
+#pragma endregion
 
     // ### Stage 3 ###
     // Parallel write permutated instances from shared SM memory back to mapped positions in global device memory
+    {
+        for (int i = 0; i < size(tIs); ++i) {
+            if (!tIp[i]) continue;           // Guard against the shuffle boundary
+            const auto iid_in_vblk = tIs[i]; // Instance ID within the flattened virtual block
+            const auto src_coord =
+                bIi[iid_in_vblk];          // Source: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to read from bXs
+            const auto dst_coord = tIi[i]; // Destination: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to write in Xg_ptr
 
-    for (int i = 0; i < size(tIs); ++i) {
-        if (!tIp[i]) continue;                   // Guard against the shuffle boundary
-        const auto iid_in_vblk = tIs[i];         // Instance ID within the flattened virtual block
-        const auto src_coord = bIi[iid_in_vblk]; // Source: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to read from bXs
-        const auto dst_coord = tIi[i]; // Destination: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to write in Xg_ptr
+            // Destination pointer arithmetic
+            const int iid_in_pblk = get<0>(dst_coord);        // Instance ID within physical block
+            const int pbid_in_vblk = get<1>(dst_coord);       // Physical block ID within virtual block
+            const int pbid = bAr[pbid_in_vblk];               // Global physical block ID
+            const auto iid = pbid * PBlockSize + iid_in_pblk; // Global target instance ID
+            auto oiid = iid + offset;                         // Offset global target instance ID
+            if (oiid >= num_instances) oiid -= num_instances; // Wrap around to compensate the offset
 
-        // Destination pointer arithmetic
-        const int iid_in_pblk = get<0>(dst_coord);        // Instance ID within physical block
-        const int pbid_in_vblk = get<1>(dst_coord);       // Physical block ID within virtual block
-        const int pbid = bAr[pbid_in_vblk];               // Global physical block ID
-        const auto iid = pbid * PBlockSize + iid_in_pblk; // Global target instance ID
-        auto oiid = iid + offset;                         // Offset global target instance ID
-        if (oiid >= num_instances) oiid -= num_instances; // Wrap around to compensate the offset
+            // Thread-owned pointer to the target instance in global device memory
+            auto tXg_instance = make_tensor(Xg_ptr + (oiid * InstanceSize), make_shape(Int<InstanceSize>{}));
 
-        // Thread-owned pointer to the target instance in global device memory
-        auto tXg_instance = make_tensor(Xg_ptr + (oiid * InstanceSize), make_shape(Int<InstanceSize>{}));
-
-        // Copy whole instance from shared memory to global device memory
-        copy(bXs(prepend(src_coord, _)), tXg_instance);
-        // TODO: consider using a single threaded vectorized copy atom for 128-bit buffer copying of large instances
+            // Copy whole instance from shared memory to global device memory
+            copy(bXs(prepend(src_coord, _)), tXg_instance);
+            // TODO: consider using a single threaded vectorized copy atom for 128-bit buffer copying of large instances
+        }
     }
 }
 
+#pragma endregion
+
 /** Host-side helper functions */
+#pragma region Host helper functions
 
 // Get GPU program block size for CUDA arch, optimized for SM occupancy
 // (not to mistake with pblock or vblock sizes, which refer to shuffle algorithm parameters)
@@ -252,7 +292,11 @@ constexpr int get_block_size()
     return 64;
 }
 
-/** POV Shuffle -- CUDA host program */
+#pragma endregion
+
+/** CUDA host program */
+#pragma region CUDA host program
+
 template <typename DType, int PBlockSize, int VBlockSize, int InstanceSize>
 void povs_cuda(
     DType* Xg_ptr, // Instances to shuffle in place - Global device memory pointer.
@@ -353,6 +397,11 @@ cleanup:
     if (cudaStatus != cudaSuccess) exit(cudaStatus);
 }
 
+#pragma endregion
+
+/** Standalone runner (no lib interface) */
+#pragma region Standalone runner
+
 #ifdef STANDALONE_BUILD
 // Main function for trying out the standalone CUDA program (not included in package build)
 int main()
@@ -398,8 +447,15 @@ int main()
 }
 #endif
 
+#pragma endregion
+
+/** Template instancing */
+#pragma region Template instancing
+
 #if __has_include("povs_cuda_template_instances.gen.inc")
 #include "povs_cuda_template_instances.gen.inc"
 #else
 INSTANTIATE_POVS_CUDA_ALL_TYPES(8, 2, 1)
 #endif
+
+#pragma endregion
