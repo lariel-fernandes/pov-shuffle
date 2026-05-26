@@ -1,9 +1,13 @@
 
 ## Tasks
 device code:
-- [ ] Copy back to global mem with index to coordinate mapping, then coordinate to memory space
-optimizations:
+- [ ] Debug
+- [ ] Adjust variable names, comments and documentation to facilitate the mental model
+cuda optimizations:
+- [ ] Use vector copy for large instances
 - [ ] Consider using a flat vector copy layout when instance size is 1
+interface:
+- [ ] implement heuristic to infer recommended algorithm options based on problem size and device properties
 evaluation:
 - [ ] do some plot that compares against a standard local block shuffle!
 - [ ] add the exercise of breaking point by dataset size
