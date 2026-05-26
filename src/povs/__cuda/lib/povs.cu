@@ -83,19 +83,13 @@ __global__ void povs_kernel(
     auto pblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}));
     auto vblock_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}, Int<VBlockSize>{}));
     auto vblock_coarse_layout = take<1, 3>(vblock_layout); // vblock_layout without the instance dimension
-    auto assignments_layout = make_layout(make_shape(Int<VBlockSize>{}, vblock_id));
     auto flat_comp_tiler =
         make_layout(make_shape(Int<BlockSize>{})); // GPU threads-block layout for partitioning the computation of flat tensors
 
-    // Define (lazy) identity tensors
-    auto pblock_identity = make_identity_tensor(shape(pblock_layout)); // Physical block identity
-    auto vblock_identity = make_identity_tensor(shape(vblock_layout)); // Virtual block identity
-
     // Define assignment tensors and copy to registers for fast access
-    auto Ag = make_tensor(Ag_ptr, assignments_layout); // Global device memory
-    auto bAg = Ag(_, vblock_id);                       // Block-owned in global device mem
-    auto bAr = make_fragment_like(bAg);                // Block-owned in registers
-    copy(bAg, bAr);                                    // Copy from global device mem to registers
+    auto bAg = make_tensor(Ag_ptr + vblock_id * VBlockSize, make_shape(Int<VBlockSize>{})); // Block-owned in global device mem
+    auto bAr = make_fragment_like(bAg);                                                     // Block-owned in registers
+    copy(bAg, bAr);                                                                         // Copy from global device mem to registers
 
     // Sort bAr ascending, treating -1 (padding) as +infinity so it sinks to the end.
     // Guarantees the truncated last pblock (highest ID, if assigned here) lands at the last valid slot,
@@ -116,6 +110,8 @@ __global__ void povs_kernel(
     // Block-owned data instances tensor in shared SM memory
     __shared__ DType bXs_ptr[size(vblock_layout)];
     auto bXs = make_tensor(make_smem_ptr(bXs_ptr), vblock_layout);
+
+    auto pblock_identity = make_identity_tensor(shape(pblock_layout)); // Physical block identity
 
     // For each pblock id within this vblock
     for (int pbid_in_vblk = 0; pbid_in_vblk < VBlockSize; ++pbid_in_vblk) {
@@ -165,8 +161,9 @@ __global__ void povs_kernel(
             thr_copy_tiler.partition_S(bXg_pblk_tail),
             thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
         );
-        // clang-format on
     }
+    cp_async_fence(); cp_async_wait<0>(); __syncthreads(); // Sync on shared mem writes (possibly with streaming writes depending on copy atom)
+    // clang-format on
 
     // ### Stage 2 ###
     // Generate permutation index in shared SM memory (populate with identity in parallel, then run a single-threaded shuffle)
@@ -180,6 +177,8 @@ __global__ void povs_kernel(
     for (int i = 0; i < size(tIs); ++i)                                   // Parallel initialize permutation index with flat identity
         tIs[i] = bIs.layout()(tIi[i]); // layout(coord) → linear offset = the flat integer index we want
 
+    __syncthreads(); // Sync on shared mem writes
+
     // Block-owned (lazy) permutation index predicate
     auto bIp = lazy::transform(bIi, [&](auto coord) {
         const auto iid_in_pblk = get<0>(coord);           // Instance id within physical block
@@ -190,7 +189,7 @@ __global__ void povs_kernel(
         if (iid >= num_instances) return false;           // Guard against instance over-indexing in the last physical block
         return true;
     });
-    auto tIp = local_partition(bIs, flat_comp_tiler, threadIdx.x); // Thread-owned (lazy) permutation index predicate
+    auto tIp = local_partition(bIp, flat_comp_tiler, threadIdx.x); // Thread-owned (lazy) permutation index predicate
 
     // Find the last valid index (inclusive) in the permutation index tensor, which determines the boundary for the Fisher-Yates shuffle
     int shuffle_boundary = 0;
@@ -215,10 +214,12 @@ __global__ void povs_kernel(
     }
     // clang-format on
 
+    __syncthreads(); // Have other threads wait for the thread 0 to finish writing the permutated indices in shared memory
+
     // ### Stage 3 ###
     // Parallel write permutated instances from shared SM memory back to mapped positions in global device memory
 
-    for (int i = 0; i <= tIs.size(); ++i) {
+    for (int i = 0; i < size(tIs); ++i) {
         if (!tIp[i]) continue;                   // Guard against the shuffle boundary
         const auto iid_in_vblk = tIs[i];         // Instance ID within the flattened virtual block
         const auto src_coord = bIi[iid_in_vblk]; // Source: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to read from bXs
@@ -282,7 +283,7 @@ void povs_cuda(
     std::uniform_int_distribution seed_dist(MIN_SEED, MAX_SEED - 1);
 
     // Allocate host pointers
-    long* Sh_ptr = new long[num_vblocks];     // Random generator seeds - Host memory pointer with shape (num_vblocks,)
+    int* Sh_ptr = new int[num_vblocks];       // Random generator seeds - Host memory pointer with shape (num_vblocks,)
     long* Ah_ptr = new long[num_assignments]; // Physical to Virtual block assignments - Host memory pointer with shape (num_assignments,)
     for (int i = 0; i < num_assignments; ++i)
         Ah_ptr[i] = i < num_pblocks ? i : -1; // Initialize with identity mapping for every valid pblock ID, padding with -1
@@ -303,7 +304,7 @@ void povs_cuda(
             bool lambda_completed = false; // Flag for detecting if the lambda execution was cut short by an error
 
             // GPU program block arithmetic
-            const int num_blocks = num_pblocks;
+            const int num_blocks = num_vblocks;
             constexpr int BlockSize = get_block_size<kCudaArch>();
 
             long offset = 0l; // Declare variable before the CUDA status check macros
@@ -345,8 +346,8 @@ void povs_cuda(
 #endif
 
 cleanup:
-    free(Ah_ptr);
-    free(Sh_ptr);
+    delete[] Ah_ptr;
+    delete[] Sh_ptr;
     cudaFree(Ag_ptr);
     cudaFree(Sg_ptr);
     if (cudaStatus != cudaSuccess) exit(cudaStatus);
