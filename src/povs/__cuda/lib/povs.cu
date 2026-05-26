@@ -198,19 +198,19 @@ __global__ void povs_kernel(
     // Generate permutation index in shared SM memory (populate with identity in parallel, then run a single-threaded shuffle)
 #pragma region Stage 2
 
-    // Permutation index tensor
-    __shared__ int bIs_ptr[size(vblock_instances_layout)];                   // Block-owned shared mem pointer
-    auto bIs = make_tensor(make_smem_ptr(bIs_ptr), vblock_instances_layout); // Block-owned tensor in SM shared memory
-    auto bIi = make_identity_tensor(shape(bIs));                             // Block-owned lazy identity tensor
-    auto tIs = local_partition(bIs, flat_comp_tiler, threadIdx.x);           // Thread-owned tensor in SM shared memory
-    auto tIi = local_partition(bIi, flat_comp_tiler, threadIdx.x);           // Thread-owned lazy identity tensor in SM
-    for (int i = 0; i < size(tIs); ++i)                                      // Parallel initialize permutation index with flat identity
-        tIs[i] = bIs.layout()(tIi[i]); // layout(coord) → linear offset = the flat integer index we want
+    // Instances permutation index tensor
+    __shared__ int bPs_ptr[size(vblock_instances_layout)];                   // Block-owned shared mem pointer
+    auto bPs = make_tensor(make_smem_ptr(bPs_ptr), vblock_instances_layout); // Block-owned tensor in SM shared memory
+    auto bPi = make_identity_tensor(shape(bPs));                             // Block-owned lazy identity tensor
+    auto tPs = local_partition(bPs, flat_comp_tiler, threadIdx.x);           // Thread-owned tensor in SM shared memory
+    auto tPi = local_partition(bPi, flat_comp_tiler, threadIdx.x);           // Thread-owned lazy identity tensor in SM
+    for (int i = 0; i < size(tPs); ++i)                                      // Parallel initialize permutation index with flat identity
+        tPs[i] = bPs.layout()(tPi[i]); // layout(coord) → linear offset = the flat integer index we want
 
     __syncthreads(); // Sync on shared mem writes
 
     // Block-owned (lazy) permutation index predicate
-    auto bIp = lazy::transform(bIi, [&](auto coord) {
+    auto bPp = lazy::transform(bPi, [&](auto coord) {
         const auto iid_in_pblk = get<0>(coord);           // Instance id within physical block
         const auto pbid_in_vblk = get<1>(coord);          // Physical block id within virtual block
         const auto pbid = bAr[pbid_in_vblk];              // Global id of assigned physical block
@@ -219,13 +219,13 @@ __global__ void povs_kernel(
         if (iid >= num_instances) return false;           // Guard against instance over-indexing in the last physical block
         return true;
     });
-    auto tIp = local_partition(bIp, flat_comp_tiler, threadIdx.x); // Thread-owned (lazy) permutation index predicate
+    auto tPp = local_partition(bPp, flat_comp_tiler, threadIdx.x); // Thread-owned (lazy) permutation index predicate
 
     // Find the last valid index (inclusive) in the permutation index tensor, which determines the boundary for the Fisher-Yates shuffle
     int shuffle_boundary = 0;
     {
-        for (int i = size(bIs) - 1; i >= 0; --i) {
-            if (bIp[i]) {
+        for (int i = size(bPs) - 1; i >= 0; --i) {
+            if (bPp[i]) {
                 shuffle_boundary = i;
                 break;
             }
@@ -240,9 +240,9 @@ __global__ void povs_kernel(
             for (int i = 0; i <= shuffle_boundary; ++i) {
                 rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;                                                 // xorshift32
                 const int j = i + static_cast<int>((static_cast<uint64_t>(rng) * (shuffle_boundary - i + 1)) >> 32); // Lemire fast range
-                int temp = bIs[i];
-                bIs[i] = bIs[j];
-                bIs[j] = temp;
+                int temp = bPs[i];
+                bPs[i] = bPs[j];
+                bPs[j] = temp;
             }
         }
         // clang-format on
@@ -254,12 +254,12 @@ __global__ void povs_kernel(
     // ### Stage 3 ###
     // Parallel write permutated instances from shared SM memory back to mapped positions in global device memory
     {
-        for (int i = 0; i < size(tIs); ++i) {
-            if (!tIp[i]) continue;           // Guard against the shuffle boundary
-            const auto iid_in_vblk = tIs[i]; // Instance ID within the flattened virtual block
+        for (int i = 0; i < size(tPs); ++i) {
+            if (!tPp[i]) continue;           // Guard against the shuffle boundary
+            const auto iid_in_vblk = tPs[i]; // Instance ID within the flattened virtual block
             const auto src_coord =
-                bIi[iid_in_vblk];          // Source: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to read from bXs
-            const auto dst_coord = tIi[i]; // Destination: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to write in Xg_ptr
+                bPi[iid_in_vblk];          // Source: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to read from bXs
+            const auto dst_coord = tPi[i]; // Destination: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to write in Xg_ptr
 
             // Destination pointer arithmetic
             const int iid_in_pblk = get<0>(dst_coord);        // Instance ID within physical block
@@ -270,7 +270,7 @@ __global__ void povs_kernel(
             if (oiid >= num_instances) oiid -= num_instances; // Wrap around to compensate the offset
 
             // Thread-owned pointer to the target instance in global device memory
-            auto tXg_instance = make_tensor(Xg_ptr + (oiid * InstanceSize), make_shape(Int<InstanceSize>{}));
+            auto tXg_instance = make_tensor(Xg_ptr + (oiid * InstanceSize), instance_layout);
 
             // Copy whole instance from shared memory to global device memory
             copy(bXs(prepend(src_coord, _)), tXg_instance);
