@@ -9,7 +9,7 @@
 
 // Closed-open interval for sampling a numerical seed from a distribution.
 // Aligned with the respective constants in the Python module `povs.constants` for reproducibility.
-static constexpr int MIN_SEED = 0;
+static constexpr int MIN_SEED = 1;
 static constexpr int MAX_SEED = 1000;
 
 // clang-format off
@@ -202,16 +202,18 @@ __global__ void povs_kernel(
     }
 
     // Fisher-Yates shuffle of the permutation index in shared SM memory
+    // clang-format off
     if (threadIdx.x == 0) {
-        std::mt19937 rng(seed); // Initialize random generator with the (GPU)block-specific seed
+        auto rng = static_cast<uint32_t>(seed);
         for (int i = 0; i <= shuffle_boundary; ++i) {
-            std::uniform_int_distribution dist(i, shuffle_boundary);
-            int j = dist(rng);
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;                                                 // xorshift32
+            const int j = i + static_cast<int>((static_cast<uint64_t>(rng) * (shuffle_boundary - i + 1)) >> 32); // Lemire fast range
             int temp = bIs[i];
             bIs[i] = bIs[j];
             bIs[j] = temp;
         }
     }
+    // clang-format on
 
     // ### Stage 3 ###
     // Parallel write permutated instances from shared SM memory back to mapped positions in global device memory
