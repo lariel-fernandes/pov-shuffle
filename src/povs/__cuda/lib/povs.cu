@@ -62,12 +62,12 @@ auto __device__ get_tiled_copy()
  */
 template <typename DType, int PBlockSize, int VBlockSize, int InstanceSize, int BlockSize>
 __global__ void povs_kernel(
-    const DType* Xg_ptr, // Instances to shuffle in place - Global device memory pointer.
-                         // Col-major (InstanceSize, num_instances)
-    const long* Ag_ptr,  // Physical to Virtual block assignments - Global device memory pointer.
-                         // Col-major (VBlockSize, num_vblocks)
-    const int* Sg_ptr,   // Random generator seeds - Global device memory pointer with shape (num_vblocks,)
-    const long offset,   // Physical block start offset
+    DType* Xg_ptr,      // Instances to shuffle in place - Global device memory pointer.
+                        // Col-major (InstanceSize, num_instances)
+    const long* Ag_ptr, // Physical to Virtual block assignments - Global device memory pointer.
+                        // Col-major (VBlockSize, num_vblocks)
+    const int* Sg_ptr,  // Random generator seeds - Global device memory pointer with shape (num_vblocks,)
+    const long offset,  // Physical block start offset
     const long num_instances
 )
 {
@@ -177,7 +177,8 @@ __global__ void povs_kernel(
     auto bIi = make_identity_tensor(shape(bIs));                          // Block-owned lazy identity tensor
     auto tIs = local_partition(bIs, flat_comp_tiler, threadIdx.x);        // Thread-owned tensor in SM shared memory
     auto tIi = local_partition(bIi, flat_comp_tiler, threadIdx.x);        // Thread-owned lazy identity tensor in SM
-    copy(tIi, tIs);                                                       // Parallel initialize permutation index with identity
+    for (int i = 0; i < size(tIs); ++i)                                   // Parallel initialize permutation index with flat identity
+        tIs[i] = bIs.layout()(tIi[i]); // layout(coord) → linear offset = the flat integer index we want
 
     // Block-owned (lazy) permutation index predicate
     auto bIp = lazy::transform(bIi, [&](auto coord) {
@@ -222,14 +223,18 @@ __global__ void povs_kernel(
         const auto dst_coord = tIi[i]; // Destination: 2D coordinate (iid_in_pblk, pbid_in_vblk) — determines where to write in Xg_ptr
 
         // Destination pointer arithmetic
-        const int iid_in_pblk = get<0>(src_coord);        // Instance ID within physical block
-        const int pbid_in_vblk = get<1>(src_coord);       // Physical bock ID within virtual block
+        const int iid_in_pblk = get<0>(dst_coord);        // Instance ID within physical block
+        const int pbid_in_vblk = get<1>(dst_coord);       // Physical block ID within virtual block
         const int pbid = bAr[pbid_in_vblk];               // Global physical block ID
         const auto iid = pbid * PBlockSize + iid_in_pblk; // Global target instance ID
         auto oiid = iid + offset;                         // Offset global target instance ID
         if (oiid >= num_instances) oiid -= num_instances; // Wrap around to compensate the offset
 
-        Xg_ptr[oiid * InstanceSize] = bXs(prepend(src_coord, _)); // Write whole instance at position
+        // Thread-owned pointer to the target instance in global device memory
+        auto tXg_instance = make_tensor(Xg_ptr + (oiid * InstanceSize), make_shape(Int<InstanceSize>{}));
+
+        // Copy whole instance from shared memory to global device memory
+        copy(bXs(prepend(src_coord, _)), tXg_instance);
         // TODO: consider using a single threaded vectorized copy atom for 128-bit buffer copying of large instances
     }
 }
