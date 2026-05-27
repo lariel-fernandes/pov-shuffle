@@ -91,11 +91,14 @@ __global__ void povs_kernel(
     const uint vblock_id = blockIdx.x;
     const int seed = Sg_ptr[vblock_id];
 
-    // Define tilers for distributing throughput across threads when copying between global and shared mem
+    // Define tilers for distributing copy throughput and computation across threads
+#pragma region Tilers
     auto copy_tiler = get_tiled_copy<DType, get_cuda_arch(), BlockSize, InstanceSize>();
     auto thr_copy_tiler = copy_tiler.get_slice(threadIdx.x);
+    auto flat_comp_tiler = make_layout(make_shape(Int<BlockSize>{}));
+#pragma endregion
 
-    // Define reusable layouts
+    // Define reusable tensor layouts
 #pragma region Layouts
     // Hierarchy: Virtual block contains physical blocks, which contain instances, which are treated as contiguous 1-D vectors, regardless
     // of their original shape. The shuffle operates on the instances, keeping each instance intact but changing their order.
@@ -103,10 +106,9 @@ __global__ void povs_kernel(
     auto pblock_data_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}));
     auto vblock_data_layout = make_layout(make_shape(Int<InstanceSize>{}, Int<PBlockSize>{}, Int<VBlockSize>{}));
     auto vblock_instances_layout = make_layout(make_shape(Int<PBlockSize>{}, Int<VBlockSize>{}));
-    auto flat_comp_tiler = make_layout(make_shape(Int<BlockSize>{})); // Thread-block layout for partitioning computation
 #pragma endregion
 
-    // Block-owned data instances tensor in shared SM memory
+    // Initialize block-owned data instances tensor in shared SM memory
     __shared__ DType bXs_ptr[size(vblock_data_layout)];
     auto bXs = make_tensor(make_smem_ptr(bXs_ptr), vblock_data_layout);
 
@@ -132,6 +134,27 @@ __global__ void povs_kernel(
             bAr[j + 1] = key;
         }
     }
+#pragma endregion
+
+    // Initialize tensors for the instances Permutation index
+#pragma region P tensors
+    __shared__ int bPs_ptr[size(vblock_instances_layout)];                   // Block-owned shared mem pointer
+    auto bPs = make_tensor(make_smem_ptr(bPs_ptr), vblock_instances_layout); // Block-owned tensor in SM shared memory
+    auto bPi = make_identity_tensor(shape(bPs));                             // Block-owned lazy identity tensor
+    auto tPs = local_partition(bPs, flat_comp_tiler, threadIdx.x);           // Thread-owned tensor in SM shared memory
+    auto tPi = local_partition(bPi, flat_comp_tiler, threadIdx.x);           // Thread-owned lazy identity tensor in SM
+
+    // Block-owned (lazy) permutation index predicate
+    auto bPp = lazy::transform(bPi, [&](auto coord) {
+        const auto iid_in_pblk = get<0>(coord);           // Instance id within physical block
+        const auto pbid_in_vblk = get<1>(coord);          // Physical block id within virtual block
+        const auto pbid = bAr[pbid_in_vblk];              // Global id of assigned physical block
+        const auto iid = PBlockSize * pbid + iid_in_pblk; // Global instance ID that is part of that physical block
+        if (pbid == -1) return false;                     // Guard against assignment padding
+        if (iid >= num_instances) return false;           // Guard against instance over-indexing in the last physical block
+        return true;
+    });
+    auto tPp = local_partition(bPp, flat_comp_tiler, threadIdx.x); // Thread-owned (lazy) permutation index predicate
 #pragma endregion
 
     // ### Stage 1 ###
@@ -196,60 +219,41 @@ __global__ void povs_kernel(
 
     // ### Stage 2 ###
     // Generate permutation index in shared SM memory (populate with identity in parallel, then run a single-threaded shuffle)
-#pragma region Stage 2
-
-    // Instances permutation index tensor
-    __shared__ int bPs_ptr[size(vblock_instances_layout)];                   // Block-owned shared mem pointer
-    auto bPs = make_tensor(make_smem_ptr(bPs_ptr), vblock_instances_layout); // Block-owned tensor in SM shared memory
-    auto bPi = make_identity_tensor(shape(bPs));                             // Block-owned lazy identity tensor
-    auto tPs = local_partition(bPs, flat_comp_tiler, threadIdx.x);           // Thread-owned tensor in SM shared memory
-    auto tPi = local_partition(bPi, flat_comp_tiler, threadIdx.x);           // Thread-owned lazy identity tensor in SM
-    for (int i = 0; i < size(tPs); ++i)                                      // Parallel initialize permutation index with flat identity
-        tPs[i] = bPs.layout()(tPi[i]); // layout(coord) → linear offset = the flat integer index we want
-
-    __syncthreads(); // Sync on shared mem writes
-
-    // Block-owned (lazy) permutation index predicate
-    auto bPp = lazy::transform(bPi, [&](auto coord) {
-        const auto iid_in_pblk = get<0>(coord);           // Instance id within physical block
-        const auto pbid_in_vblk = get<1>(coord);          // Physical block id within virtual block
-        const auto pbid = bAr[pbid_in_vblk];              // Global id of assigned physical block
-        const auto iid = PBlockSize * pbid + iid_in_pblk; // Global instance ID that is part of that physical block
-        if (pbid == -1) return false;                     // Guard against assignment padding
-        if (iid >= num_instances) return false;           // Guard against instance over-indexing in the last physical block
-        return true;
-    });
-    auto tPp = local_partition(bPp, flat_comp_tiler, threadIdx.x); // Thread-owned (lazy) permutation index predicate
-
-    // Find the last valid index (inclusive) in the permutation index tensor, which determines the boundary for the Fisher-Yates shuffle
-    int shuffle_boundary = 0;
     {
-        for (int i = size(bPs) - 1; i >= 0; --i) {
-            if (bPp[i]) {
-                shuffle_boundary = i;
-                break;
+        for (int i = 0; i < size(tPs); ++i) // Parallel initialize permutation index with flat identity
+            tPs[i] = bPs.layout()(tPi[i]);  // layout(coord) → linear offset = the flat integer index we want
+
+        __syncthreads(); // Sync on shared mem writes
+
+        // Find the last valid index (inclusive) in the permutation index tensor, which determines the boundary for the Fisher-Yates shuffle
+        int shuffle_boundary = 0;
+        {
+            for (int i = size(bPs) - 1; i >= 0; --i) {
+                if (bPp[i]) {
+                    shuffle_boundary = i;
+                    break;
+                }
             }
         }
-    }
 
-    // Fisher-Yates shuffle of the permutation index in shared SM memory
-    {
-        // clang-format off
-        if (threadIdx.x == 0) {
-            auto rng = static_cast<uint32_t>(seed);
-            for (int i = 0; i <= shuffle_boundary; ++i) {
-                rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;                                                 // xorshift32
-                const int j = i + static_cast<int>((static_cast<uint64_t>(rng) * (shuffle_boundary - i + 1)) >> 32); // Lemire fast range
-                int temp = bPs[i];
-                bPs[i] = bPs[j];
-                bPs[j] = temp;
+        // Fisher-Yates shuffle of the permutation index in shared SM memory
+        {
+            // clang-format off
+            if (threadIdx.x == 0) {
+                auto rng = static_cast<uint32_t>(seed);
+                for (int i = 0; i <= shuffle_boundary; ++i) {
+                    rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;                                                 // xorshift32
+                    const int j = i + static_cast<int>((static_cast<uint64_t>(rng) * (shuffle_boundary - i + 1)) >> 32); // Lemire fast range
+                    int temp = bPs[i];
+                    bPs[i] = bPs[j];
+                    bPs[j] = temp;
+                }
             }
+            // clang-format on
         }
-        // clang-format on
-    }
 
-    __syncthreads(); // Have other threads wait for the thread 0 to finish writing the permutated indices in shared memory
-#pragma endregion
+        __syncthreads(); // Have other threads wait for the thread 0 to finish writing the permutated indices in shared memory
+    }
 
     // ### Stage 3 ###
     // Parallel write permutated instances from shared SM memory back to mapped positions in global device memory
