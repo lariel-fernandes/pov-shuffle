@@ -136,6 +136,7 @@ __global__ void povs_kernel(
         const auto pbid_in_vblk = get<1>(coord);          // Physical block id within virtual block
         const auto pbid = bAr[pbid_in_vblk];              // Global id of assigned physical block
         const auto iid = PBlockSize * pbid + iid_in_pblk; // Global instance ID that is part of that physical block
+        if (pbid_in_vblk >= VBlockSize) return false;     // Guard against over-indexing physical blocks within virtual block
         if (pbid == -1) return false;                     // Guard against assignment padding
         if (iid >= num_instances) return false;           // Guard against instance over-indexing in the last physical block
         return true;
@@ -174,11 +175,11 @@ __global__ void povs_kernel(
             if (pbid == -1) continue;            // Skip for assignment padding
 
             // Pblock start and wrap around arithmetic
-            const auto iid_start = pbid * PBlockSize; // Global instance ID that is the start of the assigned pblock
+            const auto iid_start = static_cast<long>(pbid) * PBlockSize; // Global instance ID that is the start of the assigned pblock
             auto oiid_start = iid_start + offset;     // Offset global instance ID that is the start of the assigned pblock
             if (oiid_start >= num_instances) oiid_start -= num_instances; // Wrap around to compensate the offset
-            const auto tail_length = max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Wrapped around pblk instances
-            const auto head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
+            const int tail_length = max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Wrapped around pblk instances
+            const int head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
 
             // Base predicate to prevent instance over-indexing in the last physical block
             auto pblock_pred = lazy::transform(pblk_data_ident, [&](auto coord) {
@@ -275,12 +276,12 @@ __global__ void povs_kernel(
             const auto dst_coord = thr_vblk_inst_ident[i];       // tiled vblk inst ident at iter i -> dst coord in vblk inst layout
 
             // Destination pointer arithmetic
-            const int iid_in_pblk = get<0>(dst_coord);        // Instance ID within physical block
-            const int pbid_in_vblk = get<1>(dst_coord);       // Physical block ID within virtual block
-            const int pbid = bAr[pbid_in_vblk];               // Global physical block ID
-            const auto iid = pbid * PBlockSize + iid_in_pblk; // Global target instance ID
-            auto oiid = iid + offset;                         // Offset global target instance ID
-            if (oiid >= num_instances) oiid -= num_instances; // Wrap around to compensate the offset
+            const int iid_in_pblk = get<0>(dst_coord);                           // Instance ID within physical block
+            const int pbid_in_vblk = get<1>(dst_coord);                          // Physical block ID within virtual block
+            const int pbid = bAr[pbid_in_vblk];                                  // Global physical block ID
+            const auto iid = static_cast<long>(pbid) * PBlockSize + iid_in_pblk; // Global target instance ID
+            auto oiid = iid + offset;                                            // Offset global target instance ID
+            if (oiid >= num_instances) oiid -= num_instances;                    // Wrap around to compensate the offset
 
             // Thread-owned tensor pointing to the target instance in global device memory
             auto tXg_instance = make_tensor(Xg_ptr + (oiid * InstanceSize), instance_layout);
