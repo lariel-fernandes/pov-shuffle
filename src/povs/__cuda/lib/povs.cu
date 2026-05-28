@@ -23,9 +23,9 @@ static constexpr int MAX_SEED = 1000;
 // clang-format off
 #define DISPATCH_CUDA_ARCH(cuda_arch, lambda) \
     [&]() {                                   \
-        if      (cuda_arch >= 900) { constexpr int kCudaArch = 900; return lambda(); } \
-        else if (cuda_arch >= 800) { constexpr int kCudaArch = 800; return lambda(); } \
-        else                       { constexpr int kCudaArch = 700; return lambda(); } \
+        if      (cuda_arch >= 900) { constexpr int CudaArch = 900; return lambda(); } \
+        else if (cuda_arch >= 800) { constexpr int CudaArch = 800; return lambda(); } \
+        else                       { constexpr int CudaArch = 700; return lambda(); } \
     }()
 // clang-format on
 
@@ -39,7 +39,7 @@ constexpr int __device__ get_cuda_arch()
 #if defined(__CUDA_ARCH__)
     return __CUDA_ARCH__;
 #else
-    return 700; // Fall back to oldest supported architecture
+    return 700; // Fall back to oldest supported architecture (Volta)
 #endif
 }
 
@@ -90,6 +90,15 @@ __global__ void povs_kernel(
     using namespace cute;
     const uint vblock_id = blockIdx.x;
     const int seed = Sg_ptr[vblock_id];
+
+    // Static assertions
+    {
+        // clang-format off
+        CUTE_STATIC_ASSERT(PBlockSize % VBlockSize == 0, "PBlockSize must be divisible by VBlockSize");
+        CUTE_STATIC_ASSERT(PBlockSize < BlockSize || PBlockSize % BlockSize == 0, "If PBlockSize > Thread-BlockSize, the former must be divisible by the later");
+        CUTE_STATIC_ASSERT(BlockSize < PBlockSize || BlockSize % PBlockSize == 0, "If Thread-BlockSize > PBlockSize, the former must be divisible by the later");
+        // clang-format on
+    }
 
     // Define tilers for distributing copy throughput and computation across threads
 #pragma region Tilers
@@ -297,12 +306,33 @@ __global__ void povs_kernel(
 /** Host-side helper functions */
 #pragma region Host helper functions
 
-// Get GPU program block size for CUDA arch, optimized for SM occupancy
-// (not to mistake with pblock or vblock sizes, which refer to shuffle algorithm parameters)
-template <int cuda_arch>
+// Check if GPU thread-block size would satisfy the kernel assertions
+template <int BlockSize, int PBlockSize, int VBlockSize>
+constexpr bool satisfies_kernel_block_size_reqs()
+{
+    // clang-format off
+    return (BlockSize % VBlockSize == 0)
+        && (PBlockSize < BlockSize || PBlockSize % BlockSize == 0)
+        && (BlockSize < PBlockSize || BlockSize % PBlockSize == 0);
+    // clang-format on
+}
+
+// Get GPU thread-block size
+// Since the algorithm bottleneck for significant workloads is usually the shared memory, we prefer larger
+// thread-block sizes, so that the few or single block(s) running in each SM use as many threads as they can.
+// Limitation: returns -1 (causing a downstream kernel assertion) if no option satisfies the kernel requirements.
+template <int CudaArch, int PBlockSize, int VBlockSize>
 constexpr int get_block_size()
 {
-    return 64;
+    // clang-format off
+    if constexpr (satisfies_kernel_block_size_reqs<1024, PBlockSize, VBlockSize>()) return 1024;
+    if constexpr (satisfies_kernel_block_size_reqs< 512, PBlockSize, VBlockSize>()) return  512;
+    if constexpr (satisfies_kernel_block_size_reqs< 256, PBlockSize, VBlockSize>()) return  256;
+    if constexpr (satisfies_kernel_block_size_reqs< 128, PBlockSize, VBlockSize>()) return  128;
+    if constexpr (satisfies_kernel_block_size_reqs<  64, PBlockSize, VBlockSize>()) return   64;
+    if constexpr (satisfies_kernel_block_size_reqs<  32, PBlockSize, VBlockSize>()) return   32;
+    return -1;
+    // clang-format on
 }
 
 #pragma endregion
@@ -324,6 +354,13 @@ void povs_cuda(
     const int8_t device_id
 )
 {
+    // Static assertions
+    {
+        static_assert(PBlockSize > 0 && (PBlockSize & (PBlockSize - 1)) == 0, "PBlockSize must be a power of 2");
+        static_assert(VBlockSize > 0 && (VBlockSize & (VBlockSize - 1)) == 0, "VBlockSize must be a power of 2");
+        static_assert(VBlockSize <= PBlockSize, "VBlockSize must not exceed PBlockSize");
+    }
+
     // CUDA boilerplate
     cudaError_t cudaStatus = cudaSuccess;
     const int cuda_arch = get_device_cuda_arch(device_id);
@@ -362,7 +399,7 @@ void povs_cuda(
 
             // GPU program block arithmetic
             const int num_blocks = num_vblocks;
-            constexpr int BlockSize = get_block_size<kCudaArch>();
+            constexpr int BlockSize = (get_block_size<CudaArch, PBlockSize, VBlockSize>) ();
 
             long offset = 0l; // Declare variable before the CUDA status check macros
                               // to avoid `error: transfer of control bypasses initialization of ...`
