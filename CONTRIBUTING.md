@@ -1,12 +1,11 @@
 
 ## Tasks
-device code:
-- [ ] Investigate sequence of zeroes after the first 16 elements
 cuda optimizations:
-- [ ] check whether flat_comp_tiler is partitioning the computation evenly across threads
-- [ ] Use vector copy for large instances
-- [ ] Consider using a flat vector copy layout when instance size is 1
+- [ ] Stage 3: Consider using a vector copy to speed up copying large instances
+- [ ] copy atom helper: Consider using a 1D vector copy layout for scalar instances
 interface:
+- [ ] static assertions for the block size and pblk/vblk size relationship
+- [ ] dynamically choose gpu block size to satisfy the assertions while maximizing occupancy
 - [ ] implement heuristic to infer recommended algorithm options based on problem size and device properties
 evaluation:
 - [ ] do some plot that compares against a standard local block shuffle!

@@ -288,7 +288,6 @@ __global__ void povs_kernel(
 
             // Copy whole instance from shared memory to global device memory
             copy(bXs(prepend(src_coord, _)), tXg_instance);
-            // TODO: consider using a single threaded vectorized copy atom for 128-bit buffer copying of large instances
         }
     }
 }
