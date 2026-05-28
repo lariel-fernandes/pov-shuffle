@@ -104,7 +104,7 @@ __global__ void povs_kernel(
 #pragma region Tilers
     auto copy_tiler = get_tiled_copy<DType, get_cuda_arch(), BlockSize, InstanceSize>();
     auto thr_copy_tiler = copy_tiler.get_slice(threadIdx.x);
-    auto thr_comp_tiler = make_layout(make_shape(Int<VBlockSize>{}, Int<BlockSize / VBlockSize>{}));
+    auto thr_comp_tiler = make_layout(make_shape(Int<BlockSize / VBlockSize>{}, Int<VBlockSize>{}));
 #pragma endregion
 
     // Define reusable layouts
@@ -141,13 +141,14 @@ __global__ void povs_kernel(
 
     // Define predicates for boundary checking
     auto vblk_inst_pred = lazy::transform(vblk_inst_ident, [&](auto coord) {
-        const auto iid_in_pblk = get<0>(coord);           // Instance id within physical block
-        const auto pbid_in_vblk = get<1>(coord);          // Physical block id within virtual block
-        const auto pbid = bAr[pbid_in_vblk];              // Global id of assigned physical block
-        const auto iid = PBlockSize * pbid + iid_in_pblk; // Global instance ID that is part of that physical block
-        if (pbid_in_vblk >= VBlockSize) return false;     // Guard against over-indexing physical blocks within virtual block
-        if (pbid == -1) return false;                     // Guard against assignment padding
-        if (iid >= num_instances) return false;           // Guard against instance over-indexing in the last physical block
+        const auto iid_in_pblk = get<0>(coord);                  // Instance id within physical block
+        const auto pbid_in_vblk = get<1>(coord);                 // Physical block id within virtual block
+        const auto pbid = bAr[pbid_in_vblk];                     // Global id of assigned physical block
+        const auto iid = PBlockSize * pbid + iid_in_pblk;        // Global instance ID that is part of that physical block
+        if (pbid_in_vblk >= VBlockSize) return false;            // Guard against over-indexing physical blocks within virtual block
+        if (pbid == -1) return false;                            // Guard against assignment padding
+        if (iid >= num_instances) return false;                  // Guard against instance over-indexing in the last physical block
+        if (threadIdx.x > PBlockSize * VBlockSize) return false; // Guard against duplication when there's excess threads
         return true;
     });
     auto thr_vblk_inst_pred = local_partition(vblk_inst_pred, thr_comp_tiler, threadIdx.x);
@@ -318,13 +319,16 @@ constexpr bool satisfies_kernel_block_size_reqs()
 }
 
 // Get GPU thread-block size
-// Since the algorithm bottleneck for significant workloads is usually the shared memory, we prefer larger
+// Since the algorithm bottleneck for significant workloads is usually the shared memory, we usually prefer larger
 // thread-block sizes, so that the few or single block(s) running in each SM use as many threads as they can.
+// However, in order to avoid allocating unnecessary threads for small workloads we first try PBlockSize * VBlockSize.
 // Limitation: returns -1 (causing a downstream kernel assertion) if no option satisfies the kernel requirements.
 template <int CudaArch, int PBlockSize, int VBlockSize>
 constexpr int get_block_size()
 {
     // clang-format off
+    constexpr int total = PBlockSize * VBlockSize;
+    if constexpr (total <= 1024) return total >= 32 ? total : 32;
     if constexpr (satisfies_kernel_block_size_reqs<1024, PBlockSize, VBlockSize>()) return 1024;
     if constexpr (satisfies_kernel_block_size_reqs< 512, PBlockSize, VBlockSize>()) return  512;
     if constexpr (satisfies_kernel_block_size_reqs< 256, PBlockSize, VBlockSize>()) return  256;
