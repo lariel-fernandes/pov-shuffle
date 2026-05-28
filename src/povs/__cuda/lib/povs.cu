@@ -328,7 +328,7 @@ constexpr int get_block_size()
 {
     // clang-format off
     constexpr int total = PBlockSize * VBlockSize;
-    if constexpr (total <= 1024) return total >= 32 ? total : 32;
+    if constexpr (total <= 1024) return total;
     if constexpr (satisfies_kernel_block_size_reqs<1024, PBlockSize, VBlockSize>()) return 1024;
     if constexpr (satisfies_kernel_block_size_reqs< 512, PBlockSize, VBlockSize>()) return  512;
     if constexpr (satisfies_kernel_block_size_reqs< 256, PBlockSize, VBlockSize>()) return  256;
@@ -467,14 +467,14 @@ int main()
 
     constexpr long num_instances = 64;
     constexpr int iterations = 1;
-    constexpr int seed = 42;
+    constexpr int seed = 13;
     constexpr int8_t device_id = 0;
 
     auto* Xh_ptr = new DType[num_instances];
-    auto* Yh_ptr = new bool[num_instances];
+    auto* Yh_ptr = new int[num_instances];
     for (long i = 0; i < num_instances; ++i) {
         Xh_ptr[i] = static_cast<DType>(i);
-        Yh_ptr[i] = false;
+        Yh_ptr[i] = 0;
     }
 
     constexpr int num_offsets = 1;
@@ -489,21 +489,30 @@ int main()
     }
     cudaMemcpy(Xg_ptr, Xh_ptr, sizeof(DType) * num_instances, cudaMemcpyHostToDevice);
 
+    constexpr long print_limit = 64;
+    printf("Initial (first %ld): ", print_limit);
+    for (long i = 0; i < num_instances; ++i) {
+        if (i < print_limit) printf("%02.0f ", Xh_ptr[i]);
+    }
+    printf("\n");
+
     povs_cuda<DType, PBlockSize, VBlockSize, InstanceSize>(Xg_ptr, num_instances, Oh_ptr, num_offsets, iterations, seed, device_id);
     cudaMemcpy(Xh_ptr, Xg_ptr, sizeof(DType) * num_instances, cudaMemcpyDeviceToHost);
 
-    constexpr long print_limit = 64;
-    printf("Output (first %ld): ", print_limit);
+    printf("Output  (first %ld): ", print_limit);
     for (long i = 0; i < num_instances; ++i) {
-        if (i < print_limit) printf("%.0f ", Xh_ptr[i]);
-        Yh_ptr[static_cast<long>(Xh_ptr[i])] = true; // Mark the instance ID as seen in the output
+        if (i < print_limit) printf("%02.0f ", Xh_ptr[i]);
+        Yh_ptr[static_cast<long>(Xh_ptr[i])] += 1; // Count the instance ID as seen in the output
     }
     printf("\n");
 
     int seen = 0;
-    for (long i = 0; i < num_instances; ++i)
-        if (Yh_ptr[i]) seen++;
-    printf("Seen %d / %ld\n", seen, num_instances);
+    printf("Counts  (first %ld): ", print_limit);
+    for (long i = 0; i < num_instances; ++i) {
+        if (Yh_ptr[i] > 0) seen++;
+        printf("%02d ", Yh_ptr[i]);
+    }
+    printf("\nSeen %d / %ld\n", seen, num_instances);
 
     cudaFree(Xg_ptr);
     delete[] Xh_ptr;
