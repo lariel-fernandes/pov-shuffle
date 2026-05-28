@@ -1,8 +1,5 @@
 
 ## Tasks
-debug:
-- [ ] investigate broken predication resulting in illegal memory access for large thread-block sizes
-
 cuda optimizations:
 - [ ] Stage 3: Consider using a vector copy to speed up copying large instances
 - [ ] copy atom helper: Consider using a 1D vector copy layout for scalar instances
@@ -11,6 +8,10 @@ interface:
 - [ ] implement heuristic to infer recommended algorithm options based on problem size and device properties
 
 evaluation:
+- [ ] unit test the cuda implementation with different edge cases
+- [ ] set up evaluators for:
+ - [ ] total shuffle time per deck size, fixed iterations and instance size, optimized algorithm options per deck size
+ - [ ] shuffle iteration time per algorithm option set, fixed deck size and instance size
 - [ ] do some plot that compares against a standard local block shuffle!
 - [ ] add the exercise of breaking point by dataset size
 
