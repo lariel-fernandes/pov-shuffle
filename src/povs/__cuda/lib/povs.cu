@@ -176,7 +176,7 @@ __global__ void povs_kernel(
 
             // Pblock start and wrap around arithmetic
             const auto iid_start = static_cast<long>(pbid) * PBlockSize; // Global instance ID that is the start of the assigned pblock
-            auto oiid_start = iid_start + offset;     // Offset global instance ID that is the start of the assigned pblock
+            auto oiid_start = iid_start + offset; // Offset global instance ID that is the start of the assigned pblock
             if (oiid_start >= num_instances) oiid_start -= num_instances; // Wrap around to compensate the offset
             const int tail_length = max(0l, static_cast<long>(PBlockSize) - (num_instances - oiid_start)); // Wrapped around pblk instances
             const int head_length = PBlockSize - tail_length; // Number of instances in the pblock that are before the wrap around
