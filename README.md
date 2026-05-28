@@ -56,6 +56,11 @@ Because there is no overlap between virtual blocks, the shuffling can be done in
 Compared to a traditional local-block shuffle, the virtual block assignment significantly reduces positional bias,
 while the random offset prevents the occurrence of shuffle artifacts from the physical block boundaries.
 
+When applied to higher rank tensors, the shuffle happens along the axis 0,
+with each indexable multidimensional object along that axis being treated as a flat 1D instance
+(e.g. for a tensor with shape `(I, M, N)`, we shuffle the `I` instances,
+each instance being a `(M, N)` matrix treated as an array of length `M*N`).
+
 ### Trade-offs
 
 - **Block Size**:

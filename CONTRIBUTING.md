@@ -1,13 +1,15 @@
 
 ## Tasks
-device code:
-- [ ] Define CUTE tensors in kernel, using lazy transform with the offset and wrap around logic
-- [ ] Do vectorized copy and thread0 shuffling
-- [ ] Implement Fisher-Yates shuffle of a CUTE tensor for the device
+cuda optimizations:
+- [ ] Stage 3: Consider using a vector copy to speed up copying large instances
+- [ ] copy atom helper: Consider using a 1D vector copy layout for scalar instances
+interface:
+- [ ] static assertions for the block size and pblk/vblk size relationship
+- [ ] dynamically choose gpu block size to satisfy the assertions while maximizing occupancy
+- [ ] implement heuristic to infer recommended algorithm options based on problem size and device properties
 evaluation:
 - [ ] do some plot that compares against a standard local block shuffle!
 - [ ] add the exercise of breaking point by dataset size
-
 
 ## Project Structure
 
