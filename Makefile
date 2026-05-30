@@ -7,7 +7,8 @@ NVCC ?= nvcc
 PYTHON ?= .venv/bin/python
 
 # Directories
-SRC_DIR ?= src/povs/__cuda/lib
+BASE_SRC_DIR ?= src/povs/__cuda
+SRC_DIR ?= lib
 BUILD_DIR ?= build
 
 # Auto-detect CUDA architecture from nvidia-smi, fallback to sm_75
@@ -26,14 +27,14 @@ CUTLASS_INCLUDES := $(if $(CUTLASS_INCLUDE_DIR),-I$(CUTLASS_INCLUDE_DIR),)
 NVCC_FLAGS ?= -std=c++17 -O2 --expt-relaxed-constexpr
 NVCC_DEBUG_FLAGS ?= -std=c++17 -g -lineinfo -O1 --expt-relaxed-constexpr
 CUDA_FLAGS ?= -arch=$(CUDA_ARCH) -DWITH_CUDA -DSTANDALONE_BUILD
-INCLUDES ?= -I$(SRC_DIR) $(TORCH_INCLUDES) $(CUTLASS_INCLUDES)
+INCLUDES ?= -I$(BASE_SRC_DIR)/$(SRC_DIR) $(TORCH_INCLUDES) $(CUTLASS_INCLUDES)
 
 # Source and target
 PROGRAM ?= povs
-PROGRAM_H := $(SRC_DIR)/$(PROGRAM).h
-PROGRAM_CU := $(SRC_DIR)/$(PROGRAM).cu
+PROGRAM_H := $(BASE_SRC_DIR)/$(SRC_DIR)/$(PROGRAM).h
+PROGRAM_CU := $(BASE_SRC_DIR)/$(SRC_DIR)/$(PROGRAM).cu
 PROGRAM_BIN := $(BUILD_DIR)/$(PROGRAM).bin
-UTILS_H := $(SRC_DIR)/utils.h
+UTILS_H := src/povs/__cuda/lib/utils.h
 
 $(PROGRAM_BIN): $(PROGRAM_CU) $(PROGRAM_H) $(UTILS_H)
 	@mkdir -p $(BUILD_DIR)

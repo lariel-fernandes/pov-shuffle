@@ -87,6 +87,8 @@ pybind11_stubgen.main(["povs._cuda", "-o", "src"]);
 
 ### Running standalone CUDA programs
 ```bash
-make
+SRC_DIR=lib PROGRAM=povs make
 ```
-- See `make help` for more details.
+- By default, this compiles and runs the `main` function of [`../__cuda/lib/povs.cu`](./src/povs/__cuda/lib/povs.cu)
+- For running specific test files, use `SRC_DIR=test` and `PROGRAM=file_name`
+- See `make help` for other options.
