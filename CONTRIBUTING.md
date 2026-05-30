@@ -1,13 +1,13 @@
 
 ## Tasks
-cuda optimizations:
-- [ ] copy atom helper: Consider using a 1D vector copy layout for scalar instances
+testing:
+- [ ] manually test the kernel with different instance sizes and offsets
+- [ ] unit test the cuda implementation with different edge cases
 
 interface:
 - [ ] implement heuristic to infer recommended algorithm options based on problem size and device properties
 
 evaluation:
-- [ ] unit test the cuda implementation with different edge cases
 - [ ] set up evaluators for:
  - [ ] total shuffle time per deck size, fixed iterations and instance size, optimized algorithm options per deck size
  - [ ] shuffle iteration time per algorithm option set, fixed deck size and instance size

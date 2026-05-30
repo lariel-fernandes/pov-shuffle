@@ -53,14 +53,25 @@ constexpr auto __device__ get_gmem_to_smem_copy_atom()
         return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
 }
 
+// Given that each instance has `InstanceSize` elements of `DType`,
+// get the recommended vectorized copy width, in number of elements.
+template <typename DType, int InstanceSize>
+constexpr int __device__ get_copy_width()
+{
+    constexpr int InstanceBits = InstanceSize * static_cast<int>(sizeof(DType)) * 8;
+    // clang-format off
+    constexpr int BitWidth = InstanceBits % 128 == 0 ? 128 : InstanceBits % 64 == 0 ? 64 : InstanceBits % 32 == 0 ? 32 : 16;
+    // clang-format on
+    return BitWidth / 8 / static_cast<int>(sizeof(DType));
+}
+
 // Get tiler for distributing the copy throughput of a whole physical block across the whole GPU thread block
 template <typename DType, int CudaArch, int BlockSize, int PBlockSize, int InstanceSize>
 auto __device__ get_pblk_copy_tiler()
 {
     using namespace cute;
-    constexpr int InstanceBits = InstanceSize * static_cast<int>(sizeof(DType)) * 8;
-    constexpr int BitWidth = InstanceBits >= 128 ? 128 : InstanceBits >= 64 ? 64 : InstanceBits >= 32 ? 32 : 16;
-    constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
+    constexpr int CopyWidth = get_copy_width<DType, InstanceSize>();
+    constexpr int BitWidth = CopyWidth * static_cast<int>(sizeof(DType)) * 8; // numElements * numBytes/element * 8bits/byte = totalBits
     constexpr auto CopyAtom = get_gmem_to_smem_copy_atom<DType, CudaArch, BitWidth>();
     auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
     auto thread_layout = make_layout(make_shape(Int<BlockSize / CopyWidth>{}, Int<CopyWidth>{}));
@@ -72,9 +83,8 @@ template <typename DType, int CudaArch, int InstanceSize>
 auto __device__ get_inst_copy_tiler()
 {
     using namespace cute;
-    constexpr int InstanceBits = InstanceSize * static_cast<int>(sizeof(DType)) * 8;
-    constexpr int BitWidth = InstanceBits % 128 == 0 ? 128 : InstanceBits % 64 == 0 ? 64 : InstanceBits % 32 == 0 ? 32 : 16;
-    constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
+    constexpr int CopyWidth = get_copy_width<DType, InstanceSize>();
+    constexpr int BitWidth = CopyWidth * static_cast<int>(sizeof(DType)) * 8; // numElements * numBytes/element * 8bits/byte = totalBits
     constexpr auto CopyAtom = Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
     auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
     auto thread_layout = make_layout(make_shape(Int<1>{}));
