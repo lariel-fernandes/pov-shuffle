@@ -488,64 +488,82 @@ cleanup:
 #pragma region Standalone runner
 
 #ifdef STANDALONE_BUILD
-// Main function for trying out the standalone CUDA program (not included in package build)
+#include <cmath>
+
 int main()
 {
     using DType = float;
+    using namespace cute;
+
     constexpr int PBlockSize = 8;
     constexpr int VBlockSize = 2;
-    constexpr int InstanceSize = 1;
+    constexpr int InstanceSize = 4;
 
     constexpr long num_instances = 64;
     constexpr int iterations = 1;
     constexpr int seed = 13;
     constexpr int8_t device_id = 0;
 
-    auto* Xh_ptr = new DType[num_instances];
-    auto* Yh_ptr = new int[num_instances];
-    for (long i = 0; i < num_instances; ++i) {
-        Xh_ptr[i] = static_cast<DType>(i);
-        Yh_ptr[i] = 0;
-    }
-
     constexpr int num_offsets = 1;
     constexpr long Oh_ptr[num_offsets] = {0};
 
+    // Host buffer and CuTe tensor view: col-major (InstanceSize, num_instances)
+    auto* Xh_ptr = new DType[InstanceSize * num_instances];
+    auto Xh = make_tensor(Xh_ptr, make_shape(Int<InstanceSize>{}, num_instances));
+
+    // Instance i has elements: i + j*0.01f for element index j
+    for (long i = 0; i < num_instances; ++i)
+        for (int j = 0; j < InstanceSize; ++j)
+            Xh(j, i) = static_cast<DType>(i) + static_cast<DType>(j) * 0.01f;
+
+    constexpr long print_limit = 64;
+    printf("Initial (first %ld): ", print_limit);
+    for (long i = 0; i < num_instances && i < print_limit; ++i)
+        printf("%02.0f ", Xh(0, i));
+    printf("\n");
+
+    // Copy to device, run kernel, copy back
     DType* Xg_ptr = nullptr;
-    cudaError_t status = cudaMalloc(&Xg_ptr, sizeof(DType) * num_instances);
+    cudaError_t status = cudaMalloc(&Xg_ptr, sizeof(DType) * size(Xh));
     if (status != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(status));
         delete[] Xh_ptr;
         return 1;
     }
-    cudaMemcpy(Xg_ptr, Xh_ptr, sizeof(DType) * num_instances, cudaMemcpyHostToDevice);
-
-    constexpr long print_limit = 64;
-    printf("Initial (first %ld): ", print_limit);
-    for (long i = 0; i < num_instances; ++i) {
-        if (i < print_limit) printf("%02.0f ", Xh_ptr[i]);
-    }
-    printf("\n");
-
+    cudaMemcpy(Xg_ptr, Xh_ptr, sizeof(DType) * size(Xh), cudaMemcpyHostToDevice);
     povs_cuda<DType, PBlockSize, VBlockSize, InstanceSize>(Xg_ptr, num_instances, Oh_ptr, num_offsets, iterations, seed, device_id);
-    cudaMemcpy(Xh_ptr, Xg_ptr, sizeof(DType) * num_instances, cudaMemcpyDeviceToHost);
+    cudaMemcpy(Xh_ptr, Xg_ptr, sizeof(DType) * size(Xh), cudaMemcpyDeviceToHost);
 
     printf("Output  (first %ld): ", print_limit);
-    for (long i = 0; i < num_instances; ++i) {
-        if (i < print_limit) printf("%02.0f ", Xh_ptr[i]);
-        Yh_ptr[static_cast<long>(Xh_ptr[i])] += 1; // Count the instance ID as seen in the output
-    }
+    for (long i = 0; i < num_instances && i < print_limit; ++i)
+        printf("%02.0f ", Xh(0, i));
     printf("\n");
+
+    // Verify: count appearances per original instance ID and check element-level integrity
+    auto* seen_count = new int[num_instances]();
+    int intact = 0, broken = 0;
+    for (long i = 0; i < num_instances; ++i) {
+        const long id = static_cast<long>(roundf(Xh(0, i)));
+        if (id >= 0 && id < num_instances) seen_count[id]++;
+        bool ok = true;
+        for (int j = 0; j < InstanceSize && ok; ++j)
+            ok = fabsf(Xh(j, i) - (static_cast<DType>(id) + j * 0.01f)) < 1e-4f;
+        if (ok)
+            ++intact;
+        else
+            ++broken;
+    }
 
     int seen = 0;
     printf("Counts  (first %ld): ", print_limit);
     for (long i = 0; i < num_instances; ++i) {
-        if (Yh_ptr[i] > 0) seen++;
-        printf("%02d ", Yh_ptr[i]);
+        if (seen_count[i] > 0) seen++;
+        if (i < print_limit) printf("%02d ", seen_count[i]);
     }
-    printf("\nSeen %d / %ld\n", seen, num_instances);
+    printf("\nTotal: %ld | Seen %d | Intact %d | Broken %d\n", num_instances, seen, intact, broken);
 
     cudaFree(Xg_ptr);
+    delete[] seen_count;
     delete[] Xh_ptr;
     return 0;
 }
