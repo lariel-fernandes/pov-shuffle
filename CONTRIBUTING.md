@@ -1,7 +1,6 @@
 
 ## Tasks
 cuda optimizations:
-- [ ] Stage 3: Consider using a vector copy to speed up copying large instances
 - [ ] copy atom helper: Consider using a 1D vector copy layout for scalar instances
 
 interface:

@@ -44,7 +44,7 @@ constexpr int __device__ get_cuda_arch()
 }
 
 template <typename DType, int CudaArch, int BitWidth>
-constexpr auto __device__ get_copy_atom()
+constexpr auto __device__ get_gmem_to_smem_copy_atom()
 {
     using namespace cute;
     if constexpr (CudaArch >= 800 && BitWidth >= 32)
@@ -53,16 +53,31 @@ constexpr auto __device__ get_copy_atom()
         return Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
 }
 
-template <typename DType, int CudaArch, int BlockSize, int InstanceSize>
-auto __device__ get_tiled_copy()
+// Get tiler for distributing the copy throughput of a whole physical block across the whole GPU thread block
+template <typename DType, int CudaArch, int BlockSize, int PBlockSize, int InstanceSize>
+auto __device__ get_pblk_copy_tiler()
 {
     using namespace cute;
     constexpr int InstanceBits = InstanceSize * static_cast<int>(sizeof(DType)) * 8;
     constexpr int BitWidth = InstanceBits >= 128 ? 128 : InstanceBits >= 64 ? 64 : InstanceBits >= 32 ? 32 : 16;
     constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
-    constexpr auto CopyAtom = get_copy_atom<DType, CudaArch, BitWidth>();
+    constexpr auto CopyAtom = get_gmem_to_smem_copy_atom<DType, CudaArch, BitWidth>();
     auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
     auto thread_layout = make_layout(make_shape(Int<BlockSize / CopyWidth>{}, Int<CopyWidth>{}));
+    return make_tiled_copy(CopyAtom, thread_layout, value_layout);
+}
+
+// Get tiler for vectorizing the copy throughput of a single instance with a single thread
+template <typename DType, int CudaArch, int InstanceSize>
+auto __device__ get_inst_copy_tiler()
+{
+    using namespace cute;
+    constexpr int InstanceBits = InstanceSize * static_cast<int>(sizeof(DType)) * 8;
+    constexpr int BitWidth = InstanceBits % 128 == 0 ? 128 : InstanceBits % 64 == 0 ? 64 : InstanceBits % 32 == 0 ? 32 : 16;
+    constexpr int CopyWidth = BitWidth / 8 / sizeof(DType);
+    constexpr auto CopyAtom = Copy_Atom<UniversalCopy<uint_bit_t<BitWidth>>, DType>{};
+    auto value_layout = make_layout(make_shape(Int<CopyWidth>{}));
+    auto thread_layout = make_layout(make_shape(Int<1>{}));
     return make_tiled_copy(CopyAtom, thread_layout, value_layout);
 }
 
@@ -90,6 +105,7 @@ __global__ void povs_kernel(
     using namespace cute;
     const uint vblock_id = blockIdx.x;
     const int seed = Sg_ptr[vblock_id];
+    constexpr int CudaArch = get_cuda_arch();
 
     // Static assertions
     {
@@ -102,9 +118,11 @@ __global__ void povs_kernel(
 
     // Define tilers for distributing copy throughput and computation across threads
 #pragma region Tilers
-    auto copy_tiler = get_tiled_copy<DType, get_cuda_arch(), BlockSize, InstanceSize>();
-    auto thr_copy_tiler = copy_tiler.get_slice(threadIdx.x);
-    auto thr_comp_tiler = make_layout(make_shape(Int<BlockSize / VBlockSize>{}, Int<VBlockSize>{}));
+    auto inst_copy_tiler = get_inst_copy_tiler<DType, CudaArch, InstanceSize>();
+    auto pblk_copy_tiler = get_pblk_copy_tiler<DType, CudaArch, BlockSize, PBlockSize, InstanceSize>();
+    auto thr_inst_copy_tiler = inst_copy_tiler.get_slice(0);
+    auto thr_pblk_copy_tiler = pblk_copy_tiler.get_slice(threadIdx.x);
+    auto thr_vblk_inst_comp_tiler = make_layout(make_shape(Int<BlockSize / VBlockSize>{}, Int<VBlockSize>{}));
 #pragma endregion
 
     // Define reusable layouts
@@ -128,16 +146,16 @@ __global__ void povs_kernel(
     auto bAr = make_fragment_like(bAg);                                                     // Block-owned in registers
 
     // Define tensors for the instances permutation index
-    __shared__ int bPs_ptr[size(vblk_inst_layout)];                   // Block-owned shared memory pointer
-    auto bPs = make_tensor(make_smem_ptr(bPs_ptr), vblk_inst_layout); // Block-owned tensor in SM shared memory
-    auto tPs = local_partition(bPs, thr_comp_tiler, threadIdx.x);     // Thread-owned tensor in SM shared memory
+    __shared__ int bPs_ptr[size(vblk_inst_layout)];                         // Block-owned shared memory pointer
+    auto bPs = make_tensor(make_smem_ptr(bPs_ptr), vblk_inst_layout);       // Block-owned tensor in SM shared memory
+    auto tPs = local_partition(bPs, thr_vblk_inst_comp_tiler, threadIdx.x); // Thread-owned tensor in SM shared memory
 #pragma endregion
 
 #pragma region Lazy transforms
     // Define layout identities for coordinate mapping
     auto pblk_data_ident = make_identity_tensor(shape(pblk_data_layout));
     auto vblk_inst_ident = make_identity_tensor(shape(vblk_inst_layout));
-    auto thr_vblk_inst_ident = local_partition(vblk_inst_ident, thr_comp_tiler, threadIdx.x);
+    auto thr_vblk_inst_ident = local_partition(vblk_inst_ident, thr_vblk_inst_comp_tiler, threadIdx.x);
 
     // Define predicates for boundary checking
     auto vblk_inst_pred = lazy::transform(vblk_inst_ident, [&](auto coord) {
@@ -151,7 +169,7 @@ __global__ void povs_kernel(
         if (threadIdx.x > PBlockSize * VBlockSize) return false; // Guard against duplication when there's excess threads
         return true;
     });
-    auto thr_vblk_inst_pred = local_partition(vblk_inst_pred, thr_comp_tiler, threadIdx.x);
+    auto thr_vblk_inst_pred = local_partition(vblk_inst_pred, thr_vblk_inst_comp_tiler, threadIdx.x);
 #pragma endregion
 
     // ### Stage 0 ###
@@ -217,16 +235,16 @@ __global__ void povs_kernel(
             // Vectorized, predicated copy head and tail from global device memory to shared SM memory
             // clang-format off
             copy_if(
-                copy_tiler,
-                bXg_pblk_head_pred,
-                thr_copy_tiler.partition_S(bXg_pblk_head),
-                thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
+                pblk_copy_tiler,
+                thr_pblk_copy_tiler.partition_S(bXg_pblk_head_pred),
+                thr_pblk_copy_tiler.partition_S(bXg_pblk_head),
+                thr_pblk_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
             );
             copy_if(
-                copy_tiler,
-                bXg_pblk_tail_pred,
-                thr_copy_tiler.partition_S(bXg_pblk_tail),
-                thr_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
+                pblk_copy_tiler,
+                thr_pblk_copy_tiler.partition_S(bXg_pblk_tail_pred),
+                thr_pblk_copy_tiler.partition_S(bXg_pblk_tail),
+                thr_pblk_copy_tiler.partition_D(bXs(_, _, pbid_in_vblk))
             );
         }
         cp_async_fence(); cp_async_wait<0>(); __syncthreads(); // Sync on shared mem writes (possibly with streaming depending on copy atom)
@@ -297,7 +315,9 @@ __global__ void povs_kernel(
             auto tXg_instance = make_tensor(Xg_ptr + (oiid * InstanceSize), instance_layout);
 
             // Copy whole instance from shared memory to global device memory
-            copy(bXs(prepend(src_coord, _)), tXg_instance);
+            copy(
+                inst_copy_tiler, thr_inst_copy_tiler.partition_S(bXs(prepend(src_coord, _))), thr_inst_copy_tiler.partition_D(tXg_instance)
+            );
         }
     }
 }
@@ -363,6 +383,7 @@ void povs_cuda(
         static_assert(PBlockSize > 0 && (PBlockSize & (PBlockSize - 1)) == 0, "PBlockSize must be a power of 2");
         static_assert(VBlockSize > 0 && (VBlockSize & (VBlockSize - 1)) == 0, "VBlockSize must be a power of 2");
         static_assert(VBlockSize <= PBlockSize, "VBlockSize must not exceed PBlockSize");
+        static_assert(InstanceSize > 0, "InstanceSize must be strictly positive");
     }
 
     // CUDA boilerplate
