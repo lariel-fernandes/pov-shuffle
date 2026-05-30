@@ -1,5 +1,6 @@
 import itertools
 import os
+import re
 import typing
 from pathlib import Path
 from typing import NamedTuple, ForwardRef
@@ -55,7 +56,7 @@ def find_sources(path: str, source_file_types: set[str]) -> list[str]:
         for root, dirs, files in os.walk(path)
         for file in files
         if any(file.endswith(x) for x in source_file_types)
-        and not "test" in file
+        and not file.startswith("test_")
     ]
 
 
