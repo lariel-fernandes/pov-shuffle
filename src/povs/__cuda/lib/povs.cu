@@ -132,7 +132,7 @@ __global__ void povs_kernel(
     auto pblk_copy_tiler = get_pblk_copy_tiler<DType, CudaArch, BlockSize, PBlockSize, InstanceSize>();
     auto thr_inst_copy_tiler = inst_copy_tiler.get_slice(0);
     auto thr_pblk_copy_tiler = pblk_copy_tiler.get_slice(threadIdx.x);
-    auto thr_vblk_inst_comp_tiler = make_layout(make_shape(Int<BlockSize / VBlockSize>{}, Int<VBlockSize>{}));
+    auto vblk_inst_comp_tiler = make_layout(make_shape(Int<BlockSize / VBlockSize>{}, Int<VBlockSize>{}));
 #pragma endregion
 
     // Define reusable layouts
@@ -156,16 +156,16 @@ __global__ void povs_kernel(
     auto bAr = make_fragment_like(bAg);                                                     // Block-owned in registers
 
     // Define tensors for the instances permutation index
-    __shared__ int bPs_ptr[size(vblk_inst_layout)];                         // Block-owned shared memory pointer
-    auto bPs = make_tensor(make_smem_ptr(bPs_ptr), vblk_inst_layout);       // Block-owned tensor in SM shared memory
-    auto tPs = local_partition(bPs, thr_vblk_inst_comp_tiler, threadIdx.x); // Thread-owned tensor in SM shared memory
+    __shared__ int bPs_ptr[size(vblk_inst_layout)];                     // Block-owned shared memory pointer
+    auto bPs = make_tensor(make_smem_ptr(bPs_ptr), vblk_inst_layout);   // Block-owned tensor in SM shared memory
+    auto tPs = local_partition(bPs, vblk_inst_comp_tiler, threadIdx.x); // Thread-owned tensor in SM shared memory
 #pragma endregion
 
 #pragma region Lazy transforms
     // Define layout identities for coordinate mapping
     auto pblk_data_ident = make_identity_tensor(shape(pblk_data_layout));
     auto vblk_inst_ident = make_identity_tensor(shape(vblk_inst_layout));
-    auto thr_vblk_inst_ident = local_partition(vblk_inst_ident, thr_vblk_inst_comp_tiler, threadIdx.x);
+    auto thr_vblk_inst_ident = local_partition(vblk_inst_ident, vblk_inst_comp_tiler, threadIdx.x);
 
     // Define predicates for boundary checking
     auto vblk_inst_pred = lazy::transform(vblk_inst_ident, [&](auto coord) {
@@ -179,7 +179,7 @@ __global__ void povs_kernel(
         if (threadIdx.x > PBlockSize * VBlockSize) return false; // Guard against duplication when there's excess threads
         return true;
     });
-    auto thr_vblk_inst_pred = local_partition(vblk_inst_pred, thr_vblk_inst_comp_tiler, threadIdx.x);
+    auto thr_vblk_inst_pred = local_partition(vblk_inst_pred, vblk_inst_comp_tiler, threadIdx.x);
 #pragma endregion
 
     // ### Stage 0 ###
