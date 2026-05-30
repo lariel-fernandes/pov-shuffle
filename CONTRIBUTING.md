@@ -53,8 +53,7 @@ uv sync --frozen
 ## Format & Lint
 Python:
 ```bash
-uv run --no-sync ruff format
-uv run --no-sync ruff check --fix
+uv run --no-sync bash -c "ruff format && ruff check --fix"
 ```
 
 C++/CUDA:

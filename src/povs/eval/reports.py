@@ -3,20 +3,11 @@ from typing import NamedTuple
 import matplotlib.figure
 import pandas as pd
 
-from povs import POVSOptions
+from .params import TVDPerIterParams
 
 
 class TVDPerIterReport(NamedTuple):
     """TVD per iteration experiment report.
-
-    **Parameters**:
-
-    - `seed`: RNG seed for reproducibility.
-    - `deck_size`: Number of elements in the deck (dataset size proxy).
-    - `num_samples`: Number of independent shuffles sampled to estimate the output distribution.
-    - `max_iterations`: Number of shuffle iterations tested (from 1 to this value, inclusive).
-    - `povs_options`: POV Shuffle algorithm options used in this run.
-    - `ngram_degrees`: N-gram degrees for which TVD was measured.
 
     **Results & Metrics**:
 
@@ -47,16 +38,11 @@ class TVDPerIterReport(NamedTuple):
     - `ngram_tvds`: DataFrame with one row per iteration and one column per degree in `ngram_degrees`
     """
 
-    seed: int
-    deck_size: int
-    num_samples: int
-    max_iterations: int
+    params: TVDPerIterParams
     worker_data_scan_per_iter: float
     num_valid_offsets: int
     ideal_worker_count: int
     host_shuffle_load: float
-    povs_options: POVSOptions
-    ngram_degrees: list[int]
     baseline_tvd: float
     baseline_ngram_tvds: list[float]
     tvds: pd.DataFrame

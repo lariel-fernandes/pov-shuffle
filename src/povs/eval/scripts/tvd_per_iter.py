@@ -47,13 +47,8 @@ result = tvd_per_iteration(
 
 # Put together the report
 report = TVDPerIterReport(
-    seed=params.seed,
-    deck_size=params.deck_size,
-    num_samples=params.num_samples,
-    max_iterations=params.max_iterations,
+    params=params,
     worker_data_scan_per_iter=worker_data_scan_per_iter,
-    povs_options=params.povs_options,
-    ngram_degrees=params.ngram_degrees,
     baseline_tvd=result.baseline_tvd,
     baseline_ngram_tvds=result.baseline_ngram_tvds.tolist(),
     tvds=pd.DataFrame({
