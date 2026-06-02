@@ -80,8 +80,9 @@ def _safe_read_arr(arr: np.ndarray, offset: int, start: int, length: int) -> np.
     # Apply the start offset
     start += offset
 
-    # Read the slice and wrap around
-    return arr.take(range(start, start + length), mode="wrap")
+    # Read the slice and wrap around along axis 0 to preserve instance shape
+    indices = np.arange(start, start + length) % len(arr)
+    return arr[indices]
 
 
 def _safe_set_arr(arr: np.ndarray, offset: int, start: int, val: np.ndarray) -> None:
@@ -96,5 +97,6 @@ def _safe_set_arr(arr: np.ndarray, offset: int, start: int, val: np.ndarray) -> 
     # Apply the start offset
     start += offset
 
-    # Set the slice and wrap around
-    arr.put(range(start, start + length), val[:length], mode="wrap")
+    # Set the slice and wrap around along axis 0 to preserve instance shape
+    indices = np.arange(start, start + length) % len(arr)
+    arr[indices] = val[:length]
