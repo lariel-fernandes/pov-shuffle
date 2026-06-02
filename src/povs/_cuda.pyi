@@ -13,6 +13,7 @@ def torch_binding(
     arg3: typing.SupportsInt,
     arg4: typing.SupportsInt,
     arg5: typing.SupportsInt,
+    arg6: typing.SupportsInt,
 ) -> None:
     """
     PyTorch binding for POV Shuffle in CUDA

@@ -1,17 +1,18 @@
 
 ## Tasks
-testing:
-- [ ] manually test the kernel with different instance sizes and offsets
-- [ ] unit test the cuda implementation with different edge cases
+optimization:
+- [ ] hook the gpu block size inference
+- [ ] take care of the leftover TODOs in optim and cuda code (e.g. filling tables of optimized device parameters, limits, etc.)
+- [ ] add support for the algorithm option inference
 
-interface:
-- [ ] implement heuristic to infer recommended algorithm options based on problem size and device properties
+testing:
+- [ ] review unit tests with inferred gpu block size
+- [ ] extend unit tests to inferred algorithm options
 
 evaluation:
-- [ ] set up evaluators for:
- - [ ] total shuffle time per deck size, fixed iterations and instance size, optimized algorithm options per deck size
- - [ ] shuffle iteration time per algorithm option set, fixed deck size and instance size
-- [ ] do some plot that compares against a standard local block shuffle!
+- [ ] review new evaluation scripts
+- [ ] adjust time per deck size evaluation to use inferred algorithm options when not specified, while documenting the inferred in the report
+- [ ] do some plot that compares the resulting TVD and other biases against a standard local block shuffle!
 - [ ] add the exercise of breaking point by dataset size
 
 ## Project Structure

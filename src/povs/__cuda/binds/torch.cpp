@@ -4,6 +4,9 @@
 
 #include "../lib/povs.h"
 
+/** Macros */
+#pragma region Macros
+
 // clang-format off
 #ifndef PBLOCK_SIZE_CASES
 #define PBLOCK_SIZE_CASES(lambda) \
@@ -45,12 +48,15 @@
         }                                                                  \
     }()
 
+# pragma endregion
+
 void torch_povs(
     const torch::Tensor& X, // Data to shuffle in place along the axis 0
     const torch::Tensor& O, // Valid block start offsets
     const int iterations,
     const int pblock_size,
     const int vblock_size,
+    const int block_size,
     const int seed
 )
 {
@@ -68,7 +74,7 @@ void torch_povs(
     for (int i = 1; i < X.dim(); ++i)
         instance_size *= X.size(i);
 
-    AT_DISPATCH_ALL_TYPES(X.scalar_type(), "povs", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(at::kHalf, at::kInt, at::kLong, X.scalar_type(), "povs", [&] {
         auto* Xg_ptr = X.data_ptr<scalar_t>(); // X pointer in device global memory
 
         PBLOCK_SIZE_DISPATCH(pblock_size, [&]() {
@@ -78,7 +84,7 @@ void torch_povs(
                     (povs_cuda<scalar_t, PBLOCK_SIZE, VBLOCK_SIZE, INSTANCE_SIZE>)(
                         Xg_ptr, num_instances,
                         Oh_ptr, num_offsets,
-                        iterations, seed, X.get_device()
+                        iterations, seed, X.get_device(), block_size
                     );
                     // clang-format on
                 });

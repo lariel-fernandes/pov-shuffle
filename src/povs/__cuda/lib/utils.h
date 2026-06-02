@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <cuda_runtime.h>
 
+/** CUDA error handling */
+#pragma region CUDA error handling
+
 // If not a success: print error, store it and return true
 inline bool cuda_check_status(const cudaError_t status, const char* file, const int line, cudaError_t* status_ptr)
 {
@@ -27,6 +30,40 @@ inline bool cuda_check_status(const cudaError_t status, const char* file, const 
         if (cuda_check_status(cudaGetLastError(), __FILE__, __LINE__, status_ptr)) goto label; \
     }
 
+#pragma endregion
+
+/** CUDA host-side helper functions */
+#pragma region CUDA host-side helper functions
+
+// Get CUDA device architecture
+inline int get_device_cuda_arch(int8_t device_id)
+{
+    cudaDeviceProp prop{};
+    cudaGetDeviceProperties(&prop, device_id);
+    return prop.major * 100 + prop.minor * 10;
+}
+
+// Get the maximum GPU thread-block size for the CUDA architecture as a template parameter
+template <int CudaArch>
+constexpr int get_max_block_size()
+{
+    if constexpr (CudaArch == 130) return 1024;
+    if constexpr (CudaArch == 120) return 1024;
+    if constexpr (CudaArch == 110) return 1024;
+    if constexpr (CudaArch == 100) return 1024;
+    if constexpr (CudaArch == 900) return 1024;
+    if constexpr (CudaArch == 890) return 1024;
+    if constexpr (CudaArch == 800) return 1024;
+    if constexpr (CudaArch == 700) return 1024;
+    return -1; // Invalid architecture
+    // TODO: fill this table
+}
+
+#pragma endregion
+
+/** Generic utilities */
+#pragma region Generic utilities
+
 // Round-up division
 template <typename DTypeA, typename DTypeB>
 auto div_round_up(DTypeA a, DTypeB b)
@@ -39,14 +76,6 @@ auto div_round_up(DTypeA a, DTypeB b)
 };
 template auto div_round_up(long a, int b);
 
-// Get CUDA device architecture
-inline int get_device_cuda_arch(int8_t device_id)
-{
-    cudaDeviceProp prop{};
-    cudaGetDeviceProperties(&prop, device_id);
-    return prop.major * 100 + prop.minor * 10;
-}
-
 // Shuffle flat array in place
 template <typename DType>
 void shuffle_array(DType* arr, const long size, std::mt19937& rng)
@@ -58,5 +87,7 @@ void shuffle_array(DType* arr, const long size, std::mt19937& rng)
     }
 }
 template void shuffle_array(long arr[], long size, std::mt19937& rng);
+
+#pragma endregion
 
 #endif

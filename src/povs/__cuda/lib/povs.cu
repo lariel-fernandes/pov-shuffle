@@ -27,6 +27,25 @@ static constexpr int MAX_SEED = 1000;
         else if (cuda_arch >= 800) { constexpr int CudaArch = 800; return lambda(); } \
         else                       { constexpr int CudaArch = 700; return lambda(); } \
     }()
+
+#define DISPATCH_BLOCK_SIZE(CudaArch, PBlockSize, VBlockSize, MinBlockSize, block_size, lambda) \
+    [&]() -> bool {                                                                    \
+        constexpr int total = PBlockSize * VBlockSize;                     \
+        constexpr int MaxBlockSize = get_max_block_size<CudaArch>();                \
+        if constexpr (total >= 2048 && MaxBlockSize >= 2048 && MinBlockSize <= 2048) if (block_size == 2048) { constexpr int BlockSize = 2048; lambda(); return true; } \
+        if constexpr (total >= 1024 && MaxBlockSize >= 1024 && MinBlockSize <= 1024) if (block_size == 1024) { constexpr int BlockSize = 1024; lambda(); return true; } \
+        if constexpr (total >=  512 && MaxBlockSize >=  512 && MinBlockSize <=  512) if (block_size ==  512) { constexpr int BlockSize =  512; lambda(); return true; } \
+        if constexpr (total >=  256 && MaxBlockSize >=  256 && MinBlockSize <=  256) if (block_size ==  256) { constexpr int BlockSize =  256; lambda(); return true; } \
+        if constexpr (total >=  128 && MaxBlockSize >=  128 && MinBlockSize <=  128) if (block_size ==  128) { constexpr int BlockSize =  128; lambda(); return true; } \
+        if constexpr (total >=   64 && MaxBlockSize >=   64 && MinBlockSize <=   64) if (block_size ==   64) { constexpr int BlockSize =   64; lambda(); return true; } \
+        if constexpr (total >=   32 && MaxBlockSize >=   32 && MinBlockSize <=   32) if (block_size ==   32) { constexpr int BlockSize =   32; lambda(); return true; } \
+        if constexpr (total >=   16 && MaxBlockSize >=   16 && MinBlockSize <=   16) if (block_size ==   16) { constexpr int BlockSize =   16; lambda(); return true; } \
+        if constexpr (total >=    8 && MaxBlockSize >=    8 && MinBlockSize <=    8) if (block_size ==    8) { constexpr int BlockSize =    8; lambda(); return true; } \
+        if constexpr (total >=    4 && MaxBlockSize >=    4 && MinBlockSize <=    4) if (block_size ==    4) { constexpr int BlockSize =    4; lambda(); return true; } \
+        if constexpr (total >=    2 && MaxBlockSize >=    2 && MinBlockSize <=    2) if (block_size ==    2) { constexpr int BlockSize =    2; lambda(); return true; } \
+        if constexpr (total >=    1 && MaxBlockSize >=    1 && MinBlockSize <=    1) if (block_size ==    1) { constexpr int BlockSize =    1; lambda(); return true; } \
+        return false; \
+    }()
 // clang-format on
 
 #pragma endregion
@@ -334,43 +353,6 @@ __global__ void povs_kernel(
 
 #pragma endregion
 
-/** Host-side helper functions */
-#pragma region Host helper functions
-
-// Check if GPU thread-block size would satisfy the kernel assertions
-template <int BlockSize, int PBlockSize, int VBlockSize>
-constexpr bool satisfies_kernel_block_size_reqs()
-{
-    // clang-format off
-    return (BlockSize % VBlockSize == 0)
-        && (PBlockSize < BlockSize || PBlockSize % BlockSize == 0)
-        && (BlockSize < PBlockSize || BlockSize % PBlockSize == 0);
-    // clang-format on
-}
-
-// Get GPU thread-block size
-// Since the algorithm bottleneck for significant workloads is usually the shared memory, we usually prefer larger
-// thread-block sizes, so that the few or single block(s) running in each SM use as many threads as they can.
-// However, in order to avoid allocating unnecessary threads for small workloads we first try PBlockSize * VBlockSize.
-// Limitation: returns -1 (causing a downstream kernel assertion) if no option satisfies the kernel requirements.
-template <int CudaArch, int PBlockSize, int VBlockSize>
-constexpr int get_block_size()
-{
-    // clang-format off
-    constexpr int total = PBlockSize * VBlockSize;
-    if constexpr (total <= 1024) return total;
-    if constexpr (satisfies_kernel_block_size_reqs<1024, PBlockSize, VBlockSize>()) return 1024;
-    if constexpr (satisfies_kernel_block_size_reqs< 512, PBlockSize, VBlockSize>()) return  512;
-    if constexpr (satisfies_kernel_block_size_reqs< 256, PBlockSize, VBlockSize>()) return  256;
-    if constexpr (satisfies_kernel_block_size_reqs< 128, PBlockSize, VBlockSize>()) return  128;
-    if constexpr (satisfies_kernel_block_size_reqs<  64, PBlockSize, VBlockSize>()) return   64;
-    if constexpr (satisfies_kernel_block_size_reqs<  32, PBlockSize, VBlockSize>()) return   32;
-    return -1;
-    // clang-format on
-}
-
-#pragma endregion
-
 /** CUDA host program */
 #pragma region CUDA host program
 
@@ -385,7 +367,8 @@ void povs_cuda(
 
     const int iterations,
     const int seed,
-    const int8_t device_id
+    const int8_t device_id,
+    const int block_size
 )
 {
     // Static assertions
@@ -405,6 +388,10 @@ void povs_cuda(
     const long num_vblocks = div_round_up(num_pblocks, VBlockSize);
     const long num_assignments = num_vblocks * VBlockSize; // Number of physical to virtual block assignments. This can be larger than
                                                            // num_pblocks, in which case some vblocks will get -1 (padding) assignments
+
+    // GPU thread-block arithmetic
+    const int num_blocks = num_vblocks;
+    constexpr int MinBlockSize = get_copy_width<DType, InstanceSize>();
 
     // Initialize random distributions
     std::mt19937 rng(seed);
@@ -430,11 +417,8 @@ void povs_cuda(
 
         // Dispatch lambda and capture interruption flag
         const bool interrupted = DISPATCH_CUDA_ARCH(cuda_arch, [&] {
+            bool valid_block_size = false; // Flag for detecting a bad block size dispatch
             bool lambda_completed = false; // Flag for detecting if the lambda execution was cut short by an error
-
-            // GPU program block arithmetic
-            const int num_blocks = num_vblocks;
-            constexpr int BlockSize = (get_block_size<CudaArch, PBlockSize, VBlockSize>) ();
 
             long offset = 0l; // Declare variable before the CUDA status check macros
                               // to avoid `error: transfer of control bypasses initialization of ...`
@@ -455,8 +439,24 @@ void povs_cuda(
             offset = Oh_ptr[offset_dist(rng)];
 
             // Submit kernel
-            (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize, BlockSize>
-             <<<num_blocks, BlockSize>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
+            valid_block_size = (DISPATCH_BLOCK_SIZE(CudaArch, PBlockSize, VBlockSize, MinBlockSize, block_size, [&] {
+                (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize, BlockSize>
+                 <<<num_blocks, BlockSize>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
+            }));
+
+            // Guard against a bad block size dispatch
+            if (!valid_block_size) {
+                fprintf(
+                    stderr,
+                    "povs_cuda: block_size=%d has no valid instantiation (PBlockSize=%d, VBlockSize=%d, CudaArch=%d)\n",
+                    block_size,
+                    PBlockSize,
+                    VBlockSize,
+                    CudaArch
+                );
+                cudaStatus = cudaErrorInvalidValue;
+                goto end_lambda;
+            }
 
             lambda_completed = true; // If we reached this point, the lambda executed successfully
         end_lambda:
@@ -531,7 +531,9 @@ int main()
         return 1;
     }
     cudaMemcpy(Xg_ptr, Xh_ptr, sizeof(DType) * size(Xh), cudaMemcpyHostToDevice);
-    povs_cuda<DType, PBlockSize, VBlockSize, InstanceSize>(Xg_ptr, num_instances, Oh_ptr, num_offsets, iterations, seed, device_id);
+    povs_cuda<DType, PBlockSize, VBlockSize, InstanceSize>(
+        Xg_ptr, num_instances, Oh_ptr, num_offsets, iterations, seed, device_id, PBlockSize * VBlockSize
+    );
     cudaMemcpy(Xh_ptr, Xg_ptr, sizeof(DType) * size(Xh), cudaMemcpyDeviceToHost);
 
     printf("Output  (first %ld): ", print_limit);
@@ -547,7 +549,7 @@ int main()
         if (id >= 0 && id < num_instances) seen_count[id]++;
         bool ok = true;
         for (int j = 0; j < InstanceSize && ok; ++j)
-            ok = fabsf(Xh(j, i) - (static_cast<DType>(id) + j * 0.01f)) < 1e-4f;
+            ok = fabsf(Xh(j, i) - (static_cast<DType>(id) + static_cast<DType>(j) * 0.01f)) < 1e-4f;
         if (ok)
             ++intact;
         else

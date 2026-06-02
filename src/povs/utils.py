@@ -1,5 +1,6 @@
 import math
 
+from .constants import ALLOWED_VIRTUAL_BLOCK_SIZES
 from .types import POVSOptions
 
 
@@ -33,14 +34,28 @@ def povs_preflight(
     options: POVSOptions,
 ) -> list[int]:
     """Common validations and preparations before running any POV Shuffle implementation."""
-    # Validate parameters
+
     assert iterations >= 1
-    assert options.virtual_block_size >= 2
+
+    # Validate block sizes
+    assert is_power_of_2(options.physical_block_size)
+    assert options.virtual_block_size in ALLOWED_VIRTUAL_BLOCK_SIZES
+    assert options.virtual_block_size <= options.physical_block_size
+
+    # Validate offset parameters
     assert options.max_offset_steps >= 2
     assert options.offset_step_size > 0
     assert options.offset_step_size % options.physical_block_size != 0
 
-    # Collect offsets that are not multiples of the physical block size
+    # Require at least 2 offsets that are not multiples of the physical block size
     valid_offsets = get_valid_offsets(**options._asdict())
     assert len(valid_offsets) >= 2
     return valid_offsets
+
+
+def is_power_of_2(x: int) -> bool:
+    return x > 0 and (x & (x - 1) == 0)
+
+
+def round_down_to_power_of_2(x: int) -> int:
+    return 1 << (x.bit_length() - 1)
