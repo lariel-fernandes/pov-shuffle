@@ -4,6 +4,82 @@ import numpy as np
 from matplotlib.lines import Line2D
 
 
+def plot_time_per_deck_size(
+    deck_sizes: list[int],
+    pov_means_ms: list[float],
+    pov_stds_ms: list[float],
+    baseline_means_ms: list[float],
+    baseline_stds_ms: list[float],
+) -> matplotlib.figure.Figure:
+    """Plot shuffle time vs deck size for POV Shuffle and Fisher-Yates CUDA baseline.
+
+    :param deck_sizes: Deck sizes along the x-axis.
+    :param pov_means_ms: Mean POV Shuffle time per deck size, in milliseconds.
+    :param pov_stds_ms: Standard deviation of POV Shuffle time per deck size.
+    :param baseline_means_ms: Mean Fisher-Yates (CUDA) time per deck size, in milliseconds.
+    :param baseline_stds_ms: Standard deviation of baseline time per deck size.
+    :returns: Matplotlib figure.
+    """
+    pov_means = np.array(pov_means_ms)
+    pov_stds = np.array(pov_stds_ms)
+    baseline_means = np.array(baseline_means_ms)
+    baseline_stds = np.array(baseline_stds_ms)
+    speedups = baseline_means / pov_means
+
+    fig, ax = plt.subplots()
+
+    ax.plot(deck_sizes, pov_means, marker="o", color="C0", label="POV Shuffle")
+    ax.fill_between(deck_sizes, pov_means - pov_stds, pov_means + pov_stds, color="C0", alpha=0.2)
+    ax.plot(deck_sizes, baseline_means, marker="o", color="C1", label="Fisher-Yates (CUDA)")
+    ax.fill_between(deck_sizes, baseline_means - baseline_stds, baseline_means + baseline_stds, color="C1", alpha=0.2)
+
+    ax.set_xscale("log", base=2)
+    ax.set_xlabel("Deck Size")
+    ax.set_ylabel("Time (ms)")
+    ax.set_title("POV Shuffle — Time per Deck Size")
+    ax.legend(loc="upper left")
+    ax.grid(True)
+
+    ax2 = ax.twinx()
+    ax2.plot(deck_sizes, speedups, marker="s", linestyle="--", color="C2", label="Speedup (baseline / POV)")
+    ax2.axhline(y=1.0, color="gray", linestyle=":", linewidth=0.8)
+    ax2.set_ylabel("Speedup (×)")
+    ax2.legend(loc="upper right")
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_time_per_options(
+    labels: list[str],
+    means_ms: list[float],
+    stds_ms: list[float],
+) -> matplotlib.figure.Figure:
+    """Plot mean shuffle time per algorithm options set as a horizontal bar chart.
+
+    :param labels: Human-readable label for each options set.
+    :param means_ms: Mean shuffle time per options set, in milliseconds.
+    :param stds_ms: Standard deviation of shuffle time per options set.
+    :returns: Matplotlib figure.
+    """
+    order = sorted(range(len(means_ms)), key=lambda i: means_ms[i])
+    sorted_labels = [labels[i] for i in order]
+    sorted_means = [means_ms[i] for i in order]
+    sorted_stds = [stds_ms[i] for i in order]
+
+    fig, ax = plt.subplots()
+    y_pos = list(range(len(sorted_labels)))
+    ax.barh(y_pos, sorted_means, xerr=sorted_stds, align="center", color="C0", error_kw={"elinewidth": 1})
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(sorted_labels)
+    ax.set_xlabel("Time (ms)")
+    ax.set_title("POV Shuffle — Time per Options Set")
+    ax.grid(True, axis="x")
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_tvd_per_iteration(
     tvds: np.ndarray,
     baseline: float,

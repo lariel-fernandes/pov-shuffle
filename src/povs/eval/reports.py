@@ -3,7 +3,50 @@ from typing import NamedTuple
 import matplotlib.figure
 import pandas as pd
 
-from .params import TVDPerIterParams
+from .params import TimePerDeckSizeParams, TimePerOptionsParams, TVDPerIterParams
+
+
+class TimePerDeckSizeReport(NamedTuple):
+    """POV Shuffle time per deck size experiment report.
+
+    **Results & Metrics**:
+
+    - `plot`: Matplotlib figure showing shuffle time vs deck size for POV Shuffle and Fisher-Yates CUDA baseline,
+              with a secondary y-axis showing the speedup ratio.
+
+    - `timings`: DataFrame with one row per deck size. Columns:
+      - `deck_size`: Number of elements in the deck.
+      - `pov_mean_ms`: Mean POV Shuffle time in milliseconds across timing runs.
+      - `pov_std_ms`: Standard deviation of POV Shuffle time.
+      - `baseline_mean_ms`: Mean Fisher-Yates (CUDA randperm + copy) time in milliseconds.
+      - `baseline_std_ms`: Standard deviation of baseline time.
+      - `speedup`: Ratio `baseline_mean_ms / pov_mean_ms`. Values > 1 mean POV Shuffle is faster.
+    """
+
+    params: TimePerDeckSizeParams
+    timings: pd.DataFrame
+    plot: matplotlib.figure.Figure
+
+
+class TimePerOptionsReport(NamedTuple):
+    """POV Shuffle time per options set experiment report.
+
+    **Results & Metrics**:
+
+    - `plot`: Matplotlib figure (horizontal bar chart) comparing mean shuffle time per options configuration,
+              sorted by ascending mean time, with standard deviation error bars.
+
+    - `timings`: DataFrame with one row per options set. Columns:
+      - `label`: Human-readable label for the options configuration.
+      - `mean_ms`: Mean shuffle time in milliseconds across timing runs.
+      - `std_ms`: Standard deviation of shuffle time.
+      - `min_ms`: Minimum observed shuffle time.
+      - `max_ms`: Maximum observed shuffle time.
+    """
+
+    params: TimePerOptionsParams
+    timings: pd.DataFrame
+    plot: matplotlib.figure.Figure
 
 
 class TVDPerIterReport(NamedTuple):

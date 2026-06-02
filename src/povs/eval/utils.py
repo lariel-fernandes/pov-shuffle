@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any, Type
 
 import yaml as _yaml
@@ -15,6 +16,32 @@ class _Dumper(_yaml.Dumper):
             data = f()
 
         return super().represent_data(data)
+
+
+def time_cuda_op(op: Callable, num_warmup: int, num_runs: int) -> list[float]:
+    """Time a CUDA operation using CUDA events. Returns per-run elapsed times in milliseconds.
+
+    :param op: Callable to time; must submit work to the default CUDA stream.
+    :param num_warmup: Number of warm-up calls before measurement (not timed).
+    :param num_runs: Number of timed calls.
+    """
+    import torch
+
+    for _ in range(num_warmup):
+        op()
+    torch.cuda.synchronize()
+
+    times_ms = []
+    for _ in range(num_runs):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        op()
+        end.record()
+        torch.cuda.synchronize()
+        times_ms.append(start.elapsed_time(end))
+
+    return times_ms
 
 
 class yaml:
