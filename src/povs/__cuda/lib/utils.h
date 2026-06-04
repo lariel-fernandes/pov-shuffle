@@ -32,35 +32,6 @@ inline bool cuda_check_status(const cudaError_t status, const char* file, const 
 
 #pragma endregion
 
-/** CUDA host-side helper functions */
-#pragma region CUDA host-side helper functions
-
-// Get CUDA device architecture
-inline int get_device_cuda_arch(int8_t device_id)
-{
-    cudaDeviceProp prop{};
-    cudaGetDeviceProperties(&prop, device_id);
-    return prop.major * 100 + prop.minor * 10;
-}
-
-// Get the maximum GPU thread-block size for the CUDA architecture as a template parameter
-template <int CudaArch>
-constexpr int get_max_block_size()
-{
-    if constexpr (CudaArch == 130) return 1024;
-    if constexpr (CudaArch == 120) return 1024;
-    if constexpr (CudaArch == 110) return 1024;
-    if constexpr (CudaArch == 100) return 1024;
-    if constexpr (CudaArch == 900) return 1024;
-    if constexpr (CudaArch == 890) return 1024;
-    if constexpr (CudaArch == 800) return 1024;
-    if constexpr (CudaArch == 700) return 1024;
-    return -1; // Invalid architecture
-    // TODO: fill this table
-}
-
-#pragma endregion
-
 /** Generic utilities */
 #pragma region Generic utilities
 
@@ -72,7 +43,7 @@ auto div_round_up(DTypeA a, DTypeB b)
     const auto a_cast = static_cast<DTypeC>(a);
     const auto b_cast = static_cast<DTypeC>(b);
     const auto one = static_cast<DTypeC>(1);
-    return (a_cast + b_cast - 1) / b_cast;
+    return (a_cast + b_cast - one) / b_cast;
 };
 template auto div_round_up(long a, int b);
 

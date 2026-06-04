@@ -15,23 +15,19 @@
 static constexpr int MIN_SEED = 1;
 static constexpr int MAX_SEED = 1000;
 
+static constexpr int MIN_CUDA_ARCH = 700;
+static constexpr int MAX_BLOCK_SIZE = 1024;
+
 #pragma endregion
 
 /** Macros */
 #pragma region Macros
 
 // clang-format off
-#define DISPATCH_CUDA_ARCH(cuda_arch, lambda) \
-    [&]() {                                   \
-        if      (cuda_arch >= 900) { constexpr int CudaArch = 900; return lambda(); } \
-        else if (cuda_arch >= 800) { constexpr int CudaArch = 800; return lambda(); } \
-        else                       { constexpr int CudaArch = 700; return lambda(); } \
-    }()
-
-#define DISPATCH_BLOCK_SIZE(CudaArch, PBlockSize, VBlockSize, MinBlockSize, block_size, lambda) \
+#define DISPATCH_BLOCK_SIZE(PBlockSize, VBlockSize, MinBlockSize, block_size, lambda) \
     [&]() -> bool {                                                                    \
         constexpr int total = PBlockSize * VBlockSize;                     \
-        constexpr int MaxBlockSize = get_max_block_size<CudaArch>();                \
+        constexpr int MaxBlockSize = MAX_BLOCK_SIZE;                \
         if constexpr (total >= 2048 && MaxBlockSize >= 2048 && MinBlockSize <= 2048) if (block_size == 2048) { constexpr int BlockSize = 2048; lambda(); return true; } \
         if constexpr (total >= 1024 && MaxBlockSize >= 1024 && MinBlockSize <= 1024) if (block_size == 1024) { constexpr int BlockSize = 1024; lambda(); return true; } \
         if constexpr (total >=  512 && MaxBlockSize >=  512 && MinBlockSize <=  512) if (block_size ==  512) { constexpr int BlockSize =  512; lambda(); return true; } \
@@ -139,6 +135,7 @@ __global__ void povs_kernel(
     // Static assertions
     {
         // clang-format off
+        CUTE_STATIC_ASSERT(CudaArch >= MIN_CUDA_ARCH, "Unsupported CUDA architecture");
         CUTE_STATIC_ASSERT(PBlockSize < BlockSize || PBlockSize % BlockSize == 0, "If PBlockSize > Thread-BlockSize, the former must be divisible by the later");
         CUTE_STATIC_ASSERT(BlockSize < PBlockSize || BlockSize % PBlockSize == 0, "If Thread-BlockSize > PBlockSize, the former must be divisible by the later");
         // clang-format on
@@ -381,9 +378,9 @@ void povs_cuda(
 
     // CUDA boilerplate
     cudaError_t cudaStatus = cudaSuccess;
-    const int cuda_arch = get_device_cuda_arch(device_id);
 
     // Shuffle block arithmetic
+    long offset = 0l; // Sampled later per iteration
     const long num_pblocks = div_round_up(num_instances, PBlockSize);
     const long num_vblocks = div_round_up(num_pblocks, VBlockSize);
     const long num_assignments = num_vblocks * VBlockSize; // Number of physical to virtual block assignments. This can be larger than
@@ -392,6 +389,7 @@ void povs_cuda(
     // GPU thread-block arithmetic
     const int num_blocks = num_vblocks;
     constexpr int MinBlockSize = get_copy_width<DType, InstanceSize>();
+    bool valid_block_size = false; // Flag for the dispatch guard
 
     // Initialize random distributions
     std::mt19937 rng(seed);
@@ -415,55 +413,40 @@ void povs_cuda(
     // Iterate Kernel submissions
     for (int iter = 0; iter < iterations; ++iter) {
 
-        // Dispatch lambda and capture interruption flag
-        const bool interrupted = DISPATCH_CUDA_ARCH(cuda_arch, [&] {
-            bool valid_block_size = false; // Flag for detecting a bad block size dispatch
-            bool lambda_completed = false; // Flag for detecting if the lambda execution was cut short by an error
+        // WARNING: The sequence of rng usages in the next 3 code blocks must match the one in the numpy
+        //          implementation for reproducibility (shuffling, then seed sampling, then offset sampling)
 
-            long offset = 0l; // Declare variable before the CUDA status check macros
-                              // to avoid `error: transfer of control bypasses initialization of ...`
+        // Shuffle the pblock to vblock assignments
+        shuffle_array(Ah_ptr, num_pblocks, rng);
+        CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMemcpy(Ag_ptr, Ah_ptr, sizeof(long) * num_assignments, cudaMemcpyHostToDevice));
 
-            // WARNING: The sequence of rng usages in the next 3 code blocks must match the one in the numpy
-            //          implementation for reproducibility (shuffling, then seed sampling, then offset sampling)
+        // Sample random seeds for every vblock
+        for (int i = 0; i < num_vblocks; ++i)
+            Sh_ptr[i] = seed_dist(rng);
+        CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMemcpy(Sg_ptr, Sh_ptr, sizeof(int) * num_vblocks, cudaMemcpyHostToDevice));
 
-            // Shuffle the pblock to vblock assignments
-            shuffle_array(Ah_ptr, num_pblocks, rng);
-            CUDA_CHECK_STATUS(&cudaStatus, end_lambda, cudaMemcpy(Ag_ptr, Ah_ptr, sizeof(long) * num_assignments, cudaMemcpyHostToDevice));
+        // Sample a pblock start offset
+        offset = Oh_ptr[offset_dist(rng)];
 
-            // Sample random seeds for every vblock
-            for (int i = 0; i < num_vblocks; ++i)
-                Sh_ptr[i] = seed_dist(rng);
-            CUDA_CHECK_STATUS(&cudaStatus, end_lambda, cudaMemcpy(Sg_ptr, Sh_ptr, sizeof(int) * num_vblocks, cudaMemcpyHostToDevice));
+        // Submit kernel
+        valid_block_size = (DISPATCH_BLOCK_SIZE(PBlockSize, VBlockSize, MinBlockSize, block_size, [&] {
+            (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize, BlockSize>
+             <<<num_blocks, BlockSize>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
+        }));
 
-            // Sample a pblock start offset
-            offset = Oh_ptr[offset_dist(rng)];
+        // Guard against a bad block size dispatch
+        if (!valid_block_size) {
+            fprintf(
+                stderr,
+                "povs_cuda: block_size=%d has no valid instantiation (PBlockSize=%d, VBlockSize=%d)\n",
+                block_size,
+                PBlockSize,
+                VBlockSize
+            );
+            cudaStatus = cudaErrorInvalidValue;
+            goto cleanup;
+        }
 
-            // Submit kernel
-            valid_block_size = (DISPATCH_BLOCK_SIZE(CudaArch, PBlockSize, VBlockSize, MinBlockSize, block_size, [&] {
-                (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize, BlockSize>
-                 <<<num_blocks, BlockSize>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
-            }));
-
-            // Guard against a bad block size dispatch
-            if (!valid_block_size) {
-                fprintf(
-                    stderr,
-                    "povs_cuda: block_size=%d has no valid instantiation (PBlockSize=%d, VBlockSize=%d, CudaArch=%d)\n",
-                    block_size,
-                    PBlockSize,
-                    VBlockSize,
-                    CudaArch
-                );
-                cudaStatus = cudaErrorInvalidValue;
-                goto end_lambda;
-            }
-
-            lambda_completed = true; // If we reached this point, the lambda executed successfully
-        end_lambda:
-            return !lambda_completed;
-        });
-
-        if (interrupted) goto cleanup;
         CUDA_CHECK_LAST_STATUS(&cudaStatus, cleanup);
     }
 
