@@ -48,7 +48,7 @@
         }                                                                  \
     }()
 
-# pragma endregion
+#pragma endregion
 
 void torch_povs(
     const torch::Tensor& X, // Data to shuffle in place along the axis 0

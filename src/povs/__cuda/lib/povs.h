@@ -27,11 +27,11 @@ void povs_cuda(
         int block_size                                                     \
     );
 
-#define INSTANTIATE_POVS_CUDA_ALL_TYPES(PBlockSize, VBlockSize, InstanceSize)    \
-    INSTANTIATE_POVS_CUDA(c10::Half, PBlockSize, VBlockSize, InstanceSize)       \
-    INSTANTIATE_POVS_CUDA(int, PBlockSize, VBlockSize, InstanceSize)             \
-    INSTANTIATE_POVS_CUDA(long, PBlockSize, VBlockSize, InstanceSize)            \
-    INSTANTIATE_POVS_CUDA(float, PBlockSize, VBlockSize, InstanceSize)           \
+#define INSTANTIATE_POVS_CUDA_ALL_TYPES(PBlockSize, VBlockSize, InstanceSize) \
+    INSTANTIATE_POVS_CUDA(c10::Half, PBlockSize, VBlockSize, InstanceSize)    \
+    INSTANTIATE_POVS_CUDA(int, PBlockSize, VBlockSize, InstanceSize)          \
+    INSTANTIATE_POVS_CUDA(long, PBlockSize, VBlockSize, InstanceSize)         \
+    INSTANTIATE_POVS_CUDA(float, PBlockSize, VBlockSize, InstanceSize)        \
     INSTANTIATE_POVS_CUDA(double, PBlockSize, VBlockSize, InstanceSize)
 
 #endif
