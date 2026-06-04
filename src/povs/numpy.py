@@ -1,15 +1,15 @@
 import numpy as np
 
-from .constants import MAX_SEED, MIN_SEED
+from .common import choose_offsets, get_block_counts, get_dtype_bytes, get_instance_size, povs_preflight
+from .constants import MAX_SEED, MIN_PHYSICAL_BLOCK_SIZE, MIN_SEED, MIN_VIRTUAL_BLOCK_SIZE
 from .types import POVSOptions
-from .utils import get_block_counts, povs_preflight
 
 
 def pov_shuffle(
     data: np.ndarray,
     iterations: int = 1,
-    options: POVSOptions = POVSOptions(),
-    seed: int | np.random.Generator = None,
+    options: POVSOptions | None = None,
+    seed: int | np.random.Generator | None = None,
 ) -> None:
     """Pseudo-parallel POV Shuffle implementation based on NumPy and CPU processing.
 
@@ -22,6 +22,9 @@ def pov_shuffle(
     :param options: POV Shuffle algorithm options.
     :param seed: Random seed or random number generator state.
     """
+    # Resolve options
+    options = options or choose_options_for_dataset(data)
+
     # Coerce seed to generator
     rng = (
         seed
@@ -29,8 +32,8 @@ def pov_shuffle(
         else np.random.default_rng(seed=seed if isinstance(seed, int) else np.random.randint(MIN_SEED, MAX_SEED))
     )
 
-    # Validate parameters and get valid offsets
-    offsets = povs_preflight(iterations, options)
+    # Validate parameters
+    povs_preflight(iterations, options)
 
     # Block count arithmetic
     n_pblocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
@@ -45,7 +48,7 @@ def pov_shuffle(
         vbid_2_bids = vbid_2_bids.reshape((n_vblocks, options.virtual_block_size))
 
         seeds = rng.integers(0, 1000, size=n_vblocks)  # random seed for each virtual block
-        offset = offsets[rng.integers(0, len(offsets))]  # Sample a pblocks start offset
+        offset = options.offsets[rng.integers(0, len(options.offsets))]  # Sample a pblocks start offset
 
         def _worker(vbid: int):
             """Processes a single virtual block ID."""
@@ -66,6 +69,21 @@ def pov_shuffle(
                     _safe_set_arr(data, offset, bid * options.physical_block_size, shuffled)
 
         np.vectorize(_worker)(np.arange(n_vblocks))  # Process all virtual blocks
+
+
+def choose_options_for_dataset(data: np.ndarray) -> POVSOptions:
+    """Choose POV Shuffle options for dataset."""
+    pblock_size = MIN_PHYSICAL_BLOCK_SIZE
+
+    return POVSOptions(
+        physical_block_size=pblock_size,
+        virtual_block_size=MIN_VIRTUAL_BLOCK_SIZE,
+        offsets=choose_offsets(
+            instance_size=get_instance_size(data),
+            dtype_bytes=get_dtype_bytes(data),
+            pblock_size=pblock_size,
+        ),
+    )
 
 
 def _safe_read_arr(arr: np.ndarray, offset: int, start: int, length: int) -> np.ndarray:

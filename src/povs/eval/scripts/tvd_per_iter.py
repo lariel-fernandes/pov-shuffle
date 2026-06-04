@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from povs import POVSOptions
-from povs.utils import get_block_counts, get_valid_offsets
+from povs.common import get_block_counts
 
 from ..exercises import tvd_per_iteration
 from ..io import save_tvd_per_iter_report
@@ -23,8 +23,7 @@ params = TVDPerIterParams(
     povs_options=POVSOptions(
         physical_block_size=32,
         virtual_block_size=3,
-        offset_step_size=4,
-        max_offset_steps=16,
+        offsets=[0, 4, 8, 12, 16, 20, 24, 32],
     ),
 )
 
@@ -68,7 +67,7 @@ report = TVDPerIterReport(
         ngram_degrees=params.ngram_degrees,
         baseline_ngram_tvds=result.baseline_ngram_tvds,
     ),
-    num_valid_offsets=len(get_valid_offsets(**params.povs_options._asdict())),
+    num_valid_offsets=len(params.povs_options.offsets),
     ideal_worker_count=num_vblocks,
     host_shuffle_load=(num_vblocks * params.povs_options.virtual_block_size) / params.deck_size,
 )

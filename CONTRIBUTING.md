@@ -1,13 +1,13 @@
 
 ## Tasks
 optimization:
-- [ ] hook the gpu block size inference
 - [ ] take care of the leftover TODOs in optim and cuda code (e.g. filling tables of optimized device parameters, limits, etc.)
 - [ ] add support for the algorithm option inference
 
 testing:
 - [ ] review unit tests with inferred gpu block size
 - [ ] extend unit tests to inferred algorithm options
+- [ ] use xorshift32 in numpy workers to have reproducibility of the CUDA implementation (might also need to switch the host-side rng engine)
 
 evaluation:
 - [ ] review new evaluation scripts
@@ -28,7 +28,8 @@ evaluation:
 │   │   ├── __init__.py      # Public re-exports and user-facing API
 │   │   ├── numpy.py         # NumPy interface
 │   │   ├── torch.py         # PyTorch interface
-│   │   ├── utils.py         # Stateless utilities
+│   │   ├── utils.py         # Generic stateless utilities, math, etc
+│   │   ├── common.py        # Shared use-case-aware logic and utilities
 │   │   ├── types.py         # Public API types and aliases
 │   │   ├── eval/...         # Benchmark and evaluation resources
 │   │   │
