@@ -139,7 +139,6 @@ __global__ void povs_kernel(
     // Static assertions
     {
         // clang-format off
-        CUTE_STATIC_ASSERT(PBlockSize % VBlockSize == 0, "PBlockSize must be divisible by VBlockSize");
         CUTE_STATIC_ASSERT(PBlockSize < BlockSize || PBlockSize % BlockSize == 0, "If PBlockSize > Thread-BlockSize, the former must be divisible by the later");
         CUTE_STATIC_ASSERT(BlockSize < PBlockSize || BlockSize % PBlockSize == 0, "If Thread-BlockSize > PBlockSize, the former must be divisible by the later");
         // clang-format on
@@ -373,6 +372,7 @@ void povs_cuda(
 {
     // Static assertions
     {
+        static_assert(PBlockSize % VBlockSize == 0, "PBlockSize must be divisible by VBlockSize");
         static_assert(PBlockSize > 0 && (PBlockSize & (PBlockSize - 1)) == 0, "PBlockSize must be a power of 2");
         static_assert(VBlockSize > 0 && (VBlockSize & (VBlockSize - 1)) == 0, "VBlockSize must be a power of 2");
         static_assert(VBlockSize <= PBlockSize, "VBlockSize must not exceed PBlockSize");
