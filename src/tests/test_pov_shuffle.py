@@ -1,4 +1,5 @@
 import math
+import re
 from dataclasses import dataclass
 from itertools import product
 
@@ -8,59 +9,66 @@ import torch
 
 from povs import POVSOptions, pov_shuffle
 
-_CUDA_AVAILABLE = torch.cuda.is_available()
-_OPTS_SMALL = POVSOptions(physical_block_size=4, virtual_block_size=2, offset_step_size=1, max_offset_steps=4)
+_OPTS_SMALL = POVSOptions(physical_block_size=16, virtual_block_size=2, offsets=[8, 16])
+
+_MARK_SKIP_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available")
 
 
-@dataclass(frozen=True)
+@dataclass
 class _Case:
     deck_size: int
     instance_shape: tuple[int, ...]
     iterations: int
-    options: POVSOptions
+    options: POVSOptions | None
     device: str
+    id: str | None = None
 
-    @property
-    def id(self) -> str:
-        shape = "x".join(map(str, self.instance_shape))
-        return f"deck{self.deck_size}_shape{shape}_iter{self.iterations}_pbs{self.options.physical_block_size}_{self.device.replace(':', '')}"
+    def __post_init__(self):
+        if self.id is None:
+            shape = "x".join(map(str, self.instance_shape))
+            dev = re.sub(r":.*", self.device, "")
+            opts = list(self.options).__repr__().replace(" ", "") if self.options else ""
+            self.id = f"deck{self.deck_size}_shape{shape}_iter{self.iterations}_opts{opts}_{dev}"
 
 
-def _generate_cases() -> list:
-    cpu_cases = [
-        _Case(ds, shape, iters, opts, dev)
-        for ds, shape, iters, opts, dev in product(
-            [32, 128],
-            [(8,), (2, 4), (2, 2, 2)],
-            [1, 3],
-            [_OPTS_SMALL, POVSOptions()],
-            ["numpy", "cpu"],
-        )
-    ]
-    cuda_cases = [
-        _Case(ds, shape, iters, opts, "cuda:0")
-        for ds, shape, iters, opts in product(
-            [128],
-            [(8,), (2, 4)],
-            [1, 3],
-            [_OPTS_SMALL, POVSOptions()],
-        )
-    ]
-    result = [pytest.param(c, id=c.id) for c in cpu_cases]
-    result += [
-        pytest.param(
-            c,
-            id=c.id,
-            marks=pytest.mark.skipif(not _CUDA_AVAILABLE, reason="No CUDA device available"),
-        )
-        for c in cuda_cases
-    ]
-    return result
+@pytest.mark.parametrize(
+    "case",
+    [
+        *[
+            pytest.param(case, id=case.id)
+            for case in [
+                _Case(*vals)
+                for vals in product(
+                    [32, 128],
+                    [(8,), (2, 4), (2, 2, 2)],
+                    [1, 3],
+                    [_OPTS_SMALL, None],
+                    ["numpy", "cpu"],
+                )
+            ]
+        ],
+        *[
+            pytest.param(case, id=case.id, marks=_MARK_SKIP_CUDA)
+            for case in [
+                _Case(*vals, device="cuda:0")
+                for vals in product(
+                    [128],
+                    [(8,), (2, 4)],
+                    [1, 3],
+                    [_OPTS_SMALL, None],
+                )
+            ]
+        ],
+    ],
+)
+def test_pov_shuffle(case: _Case) -> None:
+    data = _make_deck(case.deck_size, case.instance_shape, case.device)
+    pov_shuffle(data, iterations=case.iterations, options=case.options, seed=42)
+    _check_integrity(data, case.deck_size, case.instance_shape)
 
 
 def _make_deck(deck_size: int, instance_shape: tuple[int, ...], device: str) -> np.ndarray | torch.Tensor:
-    S = math.prod(instance_shape)
-    flat = np.arange(deck_size * S, dtype=np.float32).reshape(deck_size, *instance_shape)
+    flat = np.arange(deck_size * math.prod(instance_shape), dtype=np.float32).reshape(deck_size, *instance_shape)
     if device == "numpy":
         return flat
     tensor = torch.from_numpy(flat.copy())
@@ -68,20 +76,13 @@ def _make_deck(deck_size: int, instance_shape: tuple[int, ...], device: str) -> 
 
 
 def _check_integrity(data: np.ndarray | torch.Tensor, deck_size: int, instance_shape: tuple[int, ...]) -> None:
-    S = math.prod(instance_shape)
+    instance_size = math.prod(instance_shape)
     arr = data.cpu().numpy() if isinstance(data, torch.Tensor) else data
-    flat = arr.reshape(deck_size, S)
+    flat = arr.reshape(deck_size, instance_size)
 
-    instance_ids = flat[:, 0].astype(np.int64) // S
+    instance_ids = flat[:, 0].astype(np.int64) // instance_size
 
     assert sorted(instance_ids.tolist()) == list(range(deck_size)), "deck integrity failed"
 
-    expected = (instance_ids[:, None] * S + np.arange(S)).astype(np.float32)
+    expected = (instance_ids[:, None] * instance_size + np.arange(instance_size)).astype(np.float32)
     assert np.array_equal(flat, expected), "instance integrity failed"
-
-
-@pytest.mark.parametrize("case", _generate_cases())
-def test_pov_shuffle(case: _Case) -> None:
-    data = _make_deck(case.deck_size, case.instance_shape, case.device)
-    pov_shuffle(data, iterations=case.iterations, options=case.options, seed=42)
-    _check_integrity(data, case.deck_size, case.instance_shape)
