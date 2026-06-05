@@ -23,16 +23,15 @@ MIN_VIRTUAL_BLOCK_SIZE = min(ALLOWED_VIRTUAL_BLOCK_SIZES)
 # - Thread-Block size for ideal occupancy (disregarding memory constraints, which are handled separately)
 # - Number of thread-blocks per SM when using that thread-block size (again, if not constrained by memory)
 CUDA_CC_IDEAL_OCCUPANCY: dict[tuple[int, int], tuple[int, int]] = {
-    (12, 0): (24, 64),  # Hopper (H100)
-    (11, 0): (24, 64),  # Blackwell (H100)
-    (10, 3): (32, 64),  # Hopper (H100)
-    (10, 0): (32, 64),  # Hopper (H100)
-    (9, 0): (32, 64),  # Hopper (H100)
-    (8, 9): (24, 64),  # Ada Lovelace (RTX 4xxx, L4)
-    (8, 7): (16, 64),  # Ampere consumer (RTX 3xxx, A10, A30, A40)
-    (8, 6): (16, 64),  # Ampere consumer (RTX 3xxx, A10, A30, A40)
-    (8, 0): (32, 64),  # Ampere datacenter (A100)
-    (7, 5): (16, 64),  # Turing (RTX 20xx, T4)
-    (7, 0): (32, 64),  # Volta (V100)
-}  # TODO: adjust ideal occupancy block sizes
+    (12, 0): (64, 24),
+    (11, 0): (64, 24),
+    (10, 3): (64, 32),
+    (10, 0): (64, 32),
+    (9, 0): (64, 32),
+    (8, 9): (64, 24),
+    (8, 7): (96, 16),
+    (8, 6): (96, 16),
+    (8, 0): (64, 16),
+    (7, 5): (64, 16),
+}
 CUDA_DEFAULT_IDEAL_OCCUPANCY = (64, 24)

@@ -15,6 +15,7 @@ from .constants import (
 from .types import POVSOptions
 from .utils import (
     is_power_of_2,
+    round_down_to_multiple,
     round_down_to_power_of_2,
 )
 
@@ -154,13 +155,19 @@ def choose_thr_block_size(
     # than the shared memory constraint allows, thus making the block size the bottleneck, instead of memory.
     max_threads_per_block = max_threads_per_sm // max_thr_blocks_per_sm
 
-    return round_down_to_power_of_2(
-        min(
-            target_thr_block_size,
-            max_threads_per_block,
-            pblock_size * vblock_size,  # Don't use more threads than there are instances.
-        ),
+    thr_block_size = min(
+        target_thr_block_size,
+        max_threads_per_block,
+        pblock_size * vblock_size,  # Don't use more threads than there are instances.
     )
+
+    if thr_block_size > pblock_size and thr_block_size % pblock_size != 0:
+        thr_block_size = round_down_to_multiple(thr_block_size, pblock_size)  # Round down to closest multiple of pblk
+
+    if thr_block_size < pblock_size and pblock_size % thr_block_size != 0:
+        thr_block_size = round_down_to_power_of_2(thr_block_size)  # Round down to closest divisor of pblk
+
+    return thr_block_size
 
 
 def _get_occupancy_for_smem_constraint(

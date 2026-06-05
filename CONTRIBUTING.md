@@ -1,8 +1,5 @@
 
 ## Tasks
-optimization:
-- [ ] take care of the leftover TODOs in optim and cuda code (e.g. filling tables of optimized device parameters, limits, etc.)
-
 testing:
 - [ ] review unit tests with inferred gpu block size
 - [ ] extend unit tests to inferred algorithm options
