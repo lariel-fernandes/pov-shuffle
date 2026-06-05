@@ -34,6 +34,7 @@ def pov_shuffle(
     :param seed: Random seed or random number generator state.
     """
     assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
+    # TODO: assert on supported dtype to fail eagerly, instead of failing in c++ type dispatch
 
     # Resolve options
     options = options or choose_options_for_dataset(data)

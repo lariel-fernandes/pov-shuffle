@@ -1,5 +1,8 @@
 
 ## Tasks
+debug:
+- [ ] ensure a larger than deck offset gets wrapped around as many times as necessary
+
 testing:
 - [ ] review unit tests with inferred gpu block size
 - [ ] extend unit tests to inferred algorithm options

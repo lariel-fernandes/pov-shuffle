@@ -25,10 +25,19 @@ def povs_preflight(
     """Common validations and preparations before running any POV Shuffle implementation."""
 
     assert iterations >= 1
-    assert is_power_of_2(options.physical_block_size)
-    assert options.physical_block_size >= MIN_PHYSICAL_BLOCK_SIZE
+    _validate_pblock_size(options.physical_block_size)
     assert options.virtual_block_size in ALLOWED_VIRTUAL_BLOCK_SIZES
-    assert len(options.offsets) >= MIN_OFFSETS
+    _validate_offsets(options.offsets, options.physical_block_size)
+
+
+def _validate_pblock_size(pblock_size: int) -> None:
+    assert is_power_of_2(pblock_size)
+    assert pblock_size >= MIN_PHYSICAL_BLOCK_SIZE
+
+
+def _validate_offsets(offsets: list[int], pblock_size: int) -> None:
+    assert len(offsets) >= MIN_OFFSETS
+    assert all(x == 0 or x % pblock_size != 0 for x in offsets), "Offset cannot be multiple of physical block size"
 
 
 def get_block_counts(
@@ -48,17 +57,42 @@ def choose_offsets(
     instance_size: int,
     dtype_bytes: int,
     pblock_size: int,
-    max_offsets: int | None = None,
+    max_offsets: int | None = 16,
 ) -> list[int]:
     """Choose offsets for POVSOptions.
 
-    Find a base offset that keeps 128bit memory alignment and use multiples of it that don't exceed `pblock_size`.
+    Find a base offset that keeps a decent memory alignment and use
+    multiples of it that have distinct rests when divided by `pblock_size`.
     """
+    assert max_offsets is None or max_offsets >= MIN_OFFSETS
+    max_offsets = max_offsets or MIN_OFFSETS
+
     instance_bits = instance_size * dtype_bytes * 8
-    base_offset = least_factor_to_make_multiple(instance_bits, 128)
-    num_offsets = pblock_size // base_offset
+    base_offset = _choose_base_offset(instance_bits, pblock_size)
 
-    if max_offsets is not None and max_offsets > 0:
-        num_offsets = min(num_offsets, max_offsets)
+    offsets = []
+    rests = set()
+    for i in range(max_offsets):
+        offset = i * base_offset
+        rest = 0 if offset == 0 else offset % pblock_size
 
-    return [base_offset * i for i in range(num_offsets)]
+        if rest not in rests:
+            offsets.append(offset)
+            rests.add(rest)
+
+    return offsets
+
+
+def _choose_base_offset(
+    instance_bits: int,
+    pblock_size: int,
+    alignment: int = 128,
+) -> int:
+    base_offset = least_factor_to_make_multiple(instance_bits, alignment)
+
+    if base_offset % pblock_size == 0:
+        if alignment > 16:
+            return _choose_base_offset(instance_bits, pblock_size, alignment // 2)
+        raise ValueError("Cannot find a memory-aligned base offset that is not a multiple of the physical block size")
+
+    return base_offset
