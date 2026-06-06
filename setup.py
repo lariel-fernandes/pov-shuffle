@@ -83,6 +83,10 @@ def get_macros(opts: EnvVars) -> list[tuple[str, str | None]]:
             f"case {x}: {{ constexpr int VBLOCK_SIZE = {x}; return lambda(); }};"
             for x in opts.POVS_CUDA_VBLOCK_SIZES
         ])),
+        ("INSTANCE_SIZE_CASES(lambda)", " ".join([
+            f"case {x}: {{ constexpr int INSTANCE_SIZE = {x}; return lambda(); }};"
+            for x in opts.POVS_CUDA_INSTANCE_SIZES
+        ])),
     ]
 
 

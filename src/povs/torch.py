@@ -7,10 +7,12 @@ from .common import choose_offsets, get_dtype_bytes, get_instance_size, povs_pre
 from .constants import (
     CUDA_CC_IDEAL_OCCUPANCY,
     CUDA_DEFAULT_IDEAL_OCCUPANCY,
+    MAX_BLOCK_SIZE,
     MAX_SEED,
-    MIN_PHYSICAL_BLOCK_SIZE,
+    MIN_CUDA_ARCH,
+    MIN_PBLOCK_SIZE,
     MIN_SEED,
-    MIN_VIRTUAL_BLOCK_SIZE,
+    MIN_VBLOCK_SIZE,
 )
 from .types import POVSOptions
 from .utils import (
@@ -33,8 +35,14 @@ def pov_shuffle(
     :param options: POV Shuffle algorithm options.
     :param seed: Random seed or random number generator state.
     """
+    # Dataset preflight
     assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
-    # TODO: assert on supported dtype to fail eagerly, instead of failing in c++ type dispatch
+    assert data.dtype in (torch.float16, torch.float32, torch.float64, torch.int32, torch.int64)
+    assert data.is_contiguous()
+
+    # Device preflight
+    device = torch.cuda.get_device_properties(device_id)
+    assert (device.major, device.minor) >= MIN_CUDA_ARCH
 
     # Resolve options
     options = options or choose_options_for_dataset(data)
@@ -70,7 +78,7 @@ def choose_options_for_dataset(data: torch.Tensor) -> POVSOptions:
     dtype_bytes = get_dtype_bytes(data)
 
     return POVSOptions(
-        virtual_block_size=(vblk := MIN_VIRTUAL_BLOCK_SIZE),
+        virtual_block_size=(vblk := MIN_VBLOCK_SIZE),
         physical_block_size=(pblk := choose_pblock_size(instance_size, dtype_bytes, vblk, device_id)),
         offsets=choose_offsets(instance_size, dtype_bytes, pblk),
     )
@@ -90,7 +98,7 @@ def choose_pblock_size(
     """
 
     # Set lower bounds
-    min_pblock_size = max(vblock_size, MIN_PHYSICAL_BLOCK_SIZE)
+    min_pblock_size = max(vblock_size, MIN_PBLOCK_SIZE)
     min_thr_blocks_per_sm = 1  # at least one thread block must fit in each SM
     min_instances_per_thr_block = min_pblock_size * vblock_size
     min_instances_per_sm = min_thr_blocks_per_sm * min_instances_per_thr_block
@@ -157,6 +165,7 @@ def choose_thr_block_size(
     max_threads_per_block = max_threads_per_sm // max_thr_blocks_per_sm
 
     thr_block_size = min(
+        MAX_BLOCK_SIZE,
         target_thr_block_size,
         max_threads_per_block,
         pblock_size * vblock_size,  # Don't use more threads than there are instances.

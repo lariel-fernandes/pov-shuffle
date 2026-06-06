@@ -9,14 +9,16 @@
 
 /** Constants */
 #pragma region Constants
+// Aligned with the respective constants in the Python module `povs.constants`
 
-// Closed-open interval for sampling a numerical seed from a distribution.
-// Aligned with the respective constants in the Python module `povs.constants` for reproducibility.
 static constexpr int MIN_SEED = 1;
 static constexpr int MAX_SEED = 1000;
 
-static constexpr int MIN_CUDA_ARCH = 700;
+static constexpr int MIN_CUDA_ARCH = 750;
 static constexpr int MAX_BLOCK_SIZE = 1024;
+
+static constexpr int MIN_VBLOCK_SIZE = 2;
+static constexpr int MIN_PBLOCK_SIZE = 16;
 
 #pragma endregion
 
@@ -25,21 +27,15 @@ static constexpr int MAX_BLOCK_SIZE = 1024;
 
 // clang-format off
 #define DISPATCH_BLOCK_SIZE(PBlockSize, VBlockSize, MinBlockSize, block_size, lambda) \
-    [&]() -> bool {                                                                    \
-        constexpr int total = PBlockSize * VBlockSize;                     \
-        constexpr int MaxBlockSize = MAX_BLOCK_SIZE;                \
-        if constexpr (total >= 2048 && MaxBlockSize >= 2048 && MinBlockSize <= 2048) if (block_size == 2048) { constexpr int BlockSize = 2048; lambda(); return true; } \
+    [&]() -> bool {                                                                   \
+        constexpr int total = PBlockSize * VBlockSize;                                \
+        constexpr int MaxBlockSize = MAX_BLOCK_SIZE;                                  \
         if constexpr (total >= 1024 && MaxBlockSize >= 1024 && MinBlockSize <= 1024) if (block_size == 1024) { constexpr int BlockSize = 1024; lambda(); return true; } \
         if constexpr (total >=  512 && MaxBlockSize >=  512 && MinBlockSize <=  512) if (block_size ==  512) { constexpr int BlockSize =  512; lambda(); return true; } \
         if constexpr (total >=  256 && MaxBlockSize >=  256 && MinBlockSize <=  256) if (block_size ==  256) { constexpr int BlockSize =  256; lambda(); return true; } \
         if constexpr (total >=  128 && MaxBlockSize >=  128 && MinBlockSize <=  128) if (block_size ==  128) { constexpr int BlockSize =  128; lambda(); return true; } \
         if constexpr (total >=   64 && MaxBlockSize >=   64 && MinBlockSize <=   64) if (block_size ==   64) { constexpr int BlockSize =   64; lambda(); return true; } \
         if constexpr (total >=   32 && MaxBlockSize >=   32 && MinBlockSize <=   32) if (block_size ==   32) { constexpr int BlockSize =   32; lambda(); return true; } \
-        if constexpr (total >=   16 && MaxBlockSize >=   16 && MinBlockSize <=   16) if (block_size ==   16) { constexpr int BlockSize =   16; lambda(); return true; } \
-        if constexpr (total >=    8 && MaxBlockSize >=    8 && MinBlockSize <=    8) if (block_size ==    8) { constexpr int BlockSize =    8; lambda(); return true; } \
-        if constexpr (total >=    4 && MaxBlockSize >=    4 && MinBlockSize <=    4) if (block_size ==    4) { constexpr int BlockSize =    4; lambda(); return true; } \
-        if constexpr (total >=    2 && MaxBlockSize >=    2 && MinBlockSize <=    2) if (block_size ==    2) { constexpr int BlockSize =    2; lambda(); return true; } \
-        if constexpr (total >=    1 && MaxBlockSize >=    1 && MinBlockSize <=    1) if (block_size ==    1) { constexpr int BlockSize =    1; lambda(); return true; } \
         return false; \
     }()
 // clang-format on
@@ -54,7 +50,7 @@ constexpr int __device__ get_cuda_arch()
 #if defined(__CUDA_ARCH__)
     return __CUDA_ARCH__;
 #else
-    return 700; // Fall back to oldest supported architecture (Volta)
+    return MIN_CUDA_ARCH;
 #endif
 }
 
@@ -369,6 +365,8 @@ void povs_cuda(
 {
     // Static assertions
     {
+        static_assert(VBlockSize >= MIN_VBLOCK_SIZE, "VBlockSize must be at least 2");
+        static_assert(PBlockSize >= MIN_PBLOCK_SIZE, "PBlockSize must be at least 16");
         static_assert(PBlockSize % VBlockSize == 0, "PBlockSize must be divisible by VBlockSize");
         static_assert(PBlockSize > 0 && (PBlockSize & (PBlockSize - 1)) == 0, "PBlockSize must be a power of 2");
         static_assert(VBlockSize > 0 && (VBlockSize & (VBlockSize - 1)) == 0, "VBlockSize must be a power of 2");
@@ -478,7 +476,7 @@ int main()
     using DType = float;
     using namespace cute;
 
-    constexpr int PBlockSize = 8;
+    constexpr int PBlockSize = 16;
     constexpr int VBlockSize = 2;
     constexpr int InstanceSize = 4;
 
@@ -562,7 +560,7 @@ int main()
 #if __has_include("povs_cuda_template_instances.gen.inc")
 #include "povs_cuda_template_instances.gen.inc"
 #else
-INSTANTIATE_POVS_CUDA_ALL_TYPES(8, 2, 1)
+INSTANTIATE_POVS_CUDA_ALL_TYPES(16, 2, 1)
 #endif
 
 #pragma endregion

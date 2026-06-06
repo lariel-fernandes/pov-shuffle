@@ -1,7 +1,7 @@
 import numpy as np
 
 from .common import choose_offsets, get_block_counts, get_dtype_bytes, get_instance_size, povs_preflight
-from .constants import MAX_SEED, MIN_PHYSICAL_BLOCK_SIZE, MIN_SEED, MIN_VIRTUAL_BLOCK_SIZE
+from .constants import MAX_SEED, MIN_PBLOCK_SIZE, MIN_SEED, MIN_VBLOCK_SIZE
 from .types import POVSOptions
 
 
@@ -73,11 +73,11 @@ def pov_shuffle(
 
 def choose_options_for_dataset(data: np.ndarray) -> POVSOptions:
     """Choose POV Shuffle options for dataset."""
-    pblock_size = MIN_PHYSICAL_BLOCK_SIZE
+    pblock_size = MIN_PBLOCK_SIZE
 
     return POVSOptions(
         physical_block_size=pblock_size,
-        virtual_block_size=MIN_VIRTUAL_BLOCK_SIZE,
+        virtual_block_size=MIN_VBLOCK_SIZE,
         offsets=choose_offsets(
             instance_size=get_instance_size(data),
             dtype_bytes=get_dtype_bytes(data),

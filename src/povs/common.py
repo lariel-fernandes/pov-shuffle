@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from povs import POVSOptions
-from povs.constants import ALLOWED_VIRTUAL_BLOCK_SIZES, MIN_OFFSETS, MIN_PHYSICAL_BLOCK_SIZE
+from povs.constants import ALLOWED_VIRTUAL_BLOCK_SIZES, MIN_OFFSETS, MIN_PBLOCK_SIZE
 from povs.utils import is_power_of_2, least_factor_to_make_multiple
 
 
@@ -32,7 +32,7 @@ def povs_preflight(
 
 def _validate_pblock_size(pblock_size: int) -> None:
     assert is_power_of_2(pblock_size)
-    assert pblock_size >= MIN_PHYSICAL_BLOCK_SIZE
+    assert pblock_size >= MIN_PBLOCK_SIZE
 
 
 def _validate_offsets(offsets: list[int], pblock_size: int) -> None:

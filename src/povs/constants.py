@@ -9,7 +9,7 @@ MIN_OFFSETS = 2
 
 # In the case of smallest instance size (1) and smallest dtype bytes (16) this pblock size allows
 # `povs.optim._choose_offsets` to produce at least `MIN_OFFSETS` valid offsets (namely the offset list [0, 8])
-MIN_PHYSICAL_BLOCK_SIZE = 16
+MIN_PBLOCK_SIZE = 16
 
 # In the case of smallest pblock size (16), these vblock sizes preserve the requirements:
 # - Being larger than 1
@@ -17,7 +17,10 @@ MIN_PHYSICAL_BLOCK_SIZE = 16
 # - Not exceeding pblock size
 # - Being a divisor of pblock size
 ALLOWED_VIRTUAL_BLOCK_SIZES = (2, 4, 8, 16)
-MIN_VIRTUAL_BLOCK_SIZE = min(ALLOWED_VIRTUAL_BLOCK_SIZES)
+MIN_VBLOCK_SIZE = min(ALLOWED_VIRTUAL_BLOCK_SIZES)
+
+MIN_CUDA_ARCH = (7, 5)
+MAX_BLOCK_SIZE = 1024
 
 # Lookup of Cuda Compute capability (major, minor) tuple to a tuple of:
 # - Thread-Block size for ideal occupancy (disregarding memory constraints, which are handled separately)
