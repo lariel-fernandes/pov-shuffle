@@ -1,12 +1,11 @@
 import warnings
 
 import numpy as np
-import torch
 import torch as t
 
 from . import numpy as povs_numpy
 from . import torch as povs_torch
-from .constants import MAX_SEED, MIN_SEED
+from .common import get_int_seed
 from .types import FullOptions, Options
 
 __all__ = [
@@ -36,21 +35,15 @@ def shuffle(
     if isinstance(data, t.Tensor) and data.get_device() == -1:
         data = data.numpy()
 
+    # Resolve options
     options = options or Options()
     options = optim_options_for_dataset(data, options) if None in options else FullOptions(*options)
 
+    # Dispatch shuffle
     if isinstance(data, np.ndarray):
-        if isinstance(seed, t.Generator):
-            # For numpy impl, coerce torch generator to numerical seed
-            seed = int(torch.randint(MIN_SEED, MAX_SEED, (1,), generator=seed).item())
-        povs_numpy.shuffle(data, iterations, options, seed)
-
+        povs_numpy.shuffle(data, iterations, options, get_int_seed(seed))
     elif isinstance(data, t.Tensor):
-        if isinstance(seed, np.random.Generator):
-            # For torch impl, coerce numpy generator to numerical seed
-            seed = int(seed.integers(MIN_SEED, MAX_SEED))
-        povs_torch.shuffle(data, iterations, options, seed)
-
+        povs_torch.shuffle(data, iterations, options, get_int_seed(seed))
     else:
         raise TypeError(f"Unsupported data type: {type(data)}. Expected torch.Tensor or numpy.ndarray.")
 

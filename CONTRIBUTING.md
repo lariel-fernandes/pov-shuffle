@@ -3,6 +3,9 @@
 debug:
 - [ ] ensure a larger than deck offset gets wrapped around as many times as necessary
 
+interface:
+- [ ] make full options always required in torch and numpy interfaces, with not None options required for optim, also requiring sorted specification chain
+
 testing:
 - [ ] review unit tests:
   - [ ] pblk size choice

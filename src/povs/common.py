@@ -4,9 +4,22 @@ import math
 import numpy as np
 import torch
 
-from povs import FullOptions
-from povs.constants import ALLOWED_VIRTUAL_BLOCK_SIZES, MIN_OFFSETS, MIN_PBLOCK_SIZE
-from povs.utils import is_power_of_2, least_factor_to_make_multiple
+from .constants import ALLOWED_VIRTUAL_BLOCK_SIZES, MAX_SEED, MIN_OFFSETS, MIN_PBLOCK_SIZE, MIN_SEED
+from .types import FullOptions
+from .utils import is_power_of_2, least_factor_to_make_multiple
+
+
+def get_int_seed(seed: int | torch.Generator | np.random.Generator | None) -> int:
+    if isinstance(seed, int):
+        return seed
+
+    if isinstance(seed, torch.Generator):
+        return int(torch.randint(MIN_SEED, MAX_SEED, (1,), generator=seed).item())
+
+    if seed is None:
+        seed = np.random.default_rng()
+
+    return int(seed.integers(MIN_SEED, MAX_SEED))
 
 
 def get_dtype_bytes(dataset: np.ndarray | torch.Tensor) -> int:

@@ -8,10 +8,8 @@ from .constants import (
     CUDA_CC_IDEAL_OCCUPANCY,
     CUDA_DEFAULT_IDEAL_OCCUPANCY,
     MAX_BLOCK_SIZE,
-    MAX_SEED,
     MIN_CUDA_ARCH,
     MIN_PBLOCK_SIZE,
-    MIN_SEED,
     MIN_VBLOCK_SIZE,
 )
 from .types import FullOptions, Options
@@ -24,9 +22,9 @@ from .utils import (
 
 def shuffle(
     data: torch.Tensor,
-    iterations: int = 1,
-    options: FullOptions | None = None,
-    seed: int | torch.Generator | None = None,
+    iterations: int,
+    options: FullOptions,
+    seed: int,
 ) -> None:
     """POV Shuffle implementation for torch tensors on CUDA.
 
@@ -43,12 +41,6 @@ def shuffle(
     # Device preflight
     device = torch.cuda.get_device_properties(device_id)
     assert (device.major, device.minor) >= MIN_CUDA_ARCH
-
-    # Resolve options
-    options = options or optim_options_for_dataset(data)
-
-    # Coerce to numerical seed
-    seed = seed if isinstance(seed, int) else int(torch.randint(MIN_SEED, MAX_SEED, (1,), generator=seed).item())
 
     # Validate parameters
     povs_preflight(iterations, options)
@@ -73,14 +65,15 @@ def shuffle(
 
 def optim_options_for_dataset(
     data: torch.Tensor,
-    partial_options: Options | None = None,
+    partial_options: Options,
 ) -> FullOptions:
     """Choose POV Shuffle options for dataset."""
+    assert None in partial_options
+    assert (missing := [x is None for x in partial_options]) == sorted(missing)
+
     assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
     instance_size = get_instance_size(data)
     dtype_bytes = get_dtype_bytes(data)
-
-    partial_options = partial_options or Options()
 
     return FullOptions(
         virtual_block_size=(vblk := partial_options.virtual_block_size or MIN_VBLOCK_SIZE),
