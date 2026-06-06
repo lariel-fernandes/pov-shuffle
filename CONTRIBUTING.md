@@ -12,7 +12,8 @@ testing:
 
 evaluation:
 - [ ] review new evaluation scripts
-- [ ] adjust time per deck size evaluation to use inferred algorithm options when not specified, while documenting the inferred in the report
+- [ ] allow using partial options in evals, with documenting the inferred
+- [ ] document gpu model and architecture in relevant eval reports
 - [ ] do some plot that compares the resulting TVD and other biases against a standard local block shuffle!
 - [ ] add the exercise of breaking point by dataset size
 
