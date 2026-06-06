@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 import torch
 
-from povs import POVSOptions, pov_shuffle
+from povs import FullOptions, shuffle
 
-_OPTS_SMALL = POVSOptions(physical_block_size=16, virtual_block_size=2, offsets=[8, 16])
+_OPTS_SMALL = FullOptions(physical_block_size=16, virtual_block_size=2, offsets=[8, 16])
 
 _MARK_SKIP_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available")
 
@@ -19,7 +19,7 @@ class _Case:
     deck_size: int
     instance_shape: tuple[int, ...]
     iterations: int
-    options: POVSOptions | None
+    options: FullOptions | None
     device: str
     id: str | None = None
 
@@ -63,7 +63,7 @@ class _Case:
 )
 def test_pov_shuffle(case: _Case) -> None:
     data = _make_deck(case.deck_size, case.instance_shape, case.device)
-    pov_shuffle(data, iterations=case.iterations, options=case.options, seed=42)
+    shuffle(data, iterations=case.iterations, options=case.options, seed=42)
     _check_integrity(data, case.deck_size, case.instance_shape)
 
 

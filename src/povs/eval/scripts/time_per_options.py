@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from povs import POVSOptions
+from povs import FullOptions
 
 from ..exercises import shuffle_time_per_options
 from ..io import save_time_per_options_report
@@ -23,27 +23,27 @@ params = TimePerOptionsParams(
     options_sets=[
         OptionsSetEntry(
             "pbs=16 vbs=2",
-            POVSOptions(physical_block_size=16, virtual_block_size=2, offset_step_size=4, max_offset_steps=16),
+            FullOptions(physical_block_size=16, virtual_block_size=2, offset_step_size=4, max_offset_steps=16),
         ),
         OptionsSetEntry(
             "pbs=16 vbs=4",
-            POVSOptions(physical_block_size=16, virtual_block_size=4, offset_step_size=4, max_offset_steps=16),
+            FullOptions(physical_block_size=16, virtual_block_size=4, offset_step_size=4, max_offset_steps=16),
         ),
         OptionsSetEntry(
             "pbs=32 vbs=2",
-            POVSOptions(physical_block_size=32, virtual_block_size=2, offset_step_size=4, max_offset_steps=16),
+            FullOptions(physical_block_size=32, virtual_block_size=2, offset_step_size=4, max_offset_steps=16),
         ),
         OptionsSetEntry(
             "pbs=32 vbs=4",
-            POVSOptions(physical_block_size=32, virtual_block_size=4, offset_step_size=4, max_offset_steps=16),
+            FullOptions(physical_block_size=32, virtual_block_size=4, offset_step_size=4, max_offset_steps=16),
         ),
         OptionsSetEntry(
             "pbs=64 vbs=2",
-            POVSOptions(physical_block_size=64, virtual_block_size=2, offset_step_size=8, max_offset_steps=16),
+            FullOptions(physical_block_size=64, virtual_block_size=2, offset_step_size=8, max_offset_steps=16),
         ),
         OptionsSetEntry(
             "pbs=64 vbs=4",
-            POVSOptions(physical_block_size=64, virtual_block_size=4, offset_step_size=8, max_offset_steps=16),
+            FullOptions(physical_block_size=64, virtual_block_size=4, offset_step_size=8, max_offset_steps=16),
         ),
     ],
 )

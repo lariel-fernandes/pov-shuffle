@@ -2,13 +2,13 @@ import numpy as np
 
 from .common import choose_offsets, get_block_counts, get_dtype_bytes, get_instance_size, povs_preflight
 from .constants import MAX_SEED, MIN_PBLOCK_SIZE, MIN_SEED, MIN_VBLOCK_SIZE
-from .types import POVSOptions
+from .types import FullOptions, Options
 
 
-def pov_shuffle(
+def shuffle(
     data: np.ndarray,
     iterations: int = 1,
-    options: POVSOptions | None = None,
+    options: FullOptions | None = None,
     seed: int | np.random.Generator | None = None,
 ) -> None:
     """Pseudo-parallel POV Shuffle implementation based on NumPy and CPU processing.
@@ -23,7 +23,7 @@ def pov_shuffle(
     :param seed: Random seed or random number generator state.
     """
     # Resolve options
-    options = options or choose_options_for_dataset(data)
+    options = options or optim_options_for_dataset(data)
 
     # Coerce seed to generator
     rng = (
@@ -71,17 +71,20 @@ def pov_shuffle(
         np.vectorize(_worker)(np.arange(n_vblocks))  # Process all virtual blocks
 
 
-def choose_options_for_dataset(data: np.ndarray) -> POVSOptions:
+def optim_options_for_dataset(
+    data: np.ndarray,
+    partial_options: Options | None = None,
+) -> FullOptions:
     """Choose POV Shuffle options for dataset."""
-    pblock_size = MIN_PBLOCK_SIZE
+    partial_options = partial_options or Options()
 
-    return POVSOptions(
-        physical_block_size=pblock_size,
-        virtual_block_size=MIN_VBLOCK_SIZE,
+    return FullOptions(
+        virtual_block_size=partial_options.virtual_block_size or MIN_VBLOCK_SIZE,
+        physical_block_size=(pblk := partial_options.physical_block_size or MIN_PBLOCK_SIZE),
         offsets=choose_offsets(
             instance_size=get_instance_size(data),
             dtype_bytes=get_dtype_bytes(data),
-            pblock_size=pblock_size,
+            pblock_size=pblk,
         ),
     )
 

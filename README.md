@@ -5,16 +5,16 @@ A parallelizable, iterative algorithm for efficiently shuffling large datasets i
 while sufficiently approximating a uniform shuffle within few iterations.
 
 ## Usage
-```python
-from povs import POVSOptions, pov_shuffle
 
-pov_shuffle(
+```python
+import povs
+
+povs.shuffle(
     data,  # A numpy array or PyTorch tensor
     iterations=3,
-    options=POVSOptions(...),
 )
 ```
-- See `help(pov_shuffle)` for more details.
+- See `help(povs.shuffle)` for more details.
 
 ## Installation
 ```bash

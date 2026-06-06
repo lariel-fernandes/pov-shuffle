@@ -4,9 +4,9 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from povs import POVSOptions
-from povs import pov_shuffle as _pov_shuffle
-from povs.numpy import pov_shuffle
+from povs import FullOptions
+from povs import shuffle as _pov_shuffle
+from povs.numpy import shuffle
 
 from .metrics import get_ngram_tvd, get_tvd
 from .params import OptionsSetEntry
@@ -29,7 +29,7 @@ def shuffle_time_per_deck_size(
     instance_size: int,
     num_runs: int,
     num_warmup_runs: int,
-    povs_options_per_deck_size: dict[int, POVSOptions],
+    povs_options_per_deck_size: dict[int, FullOptions],
     seed: int,
 ) -> ShuffleTimePerDeckSizeResult:
     """Measure POV Shuffle time and Fisher-Yates CUDA baseline time across deck sizes.
@@ -122,7 +122,7 @@ def tvd_per_iteration(
     deck_size: int,
     num_samples: int,
     max_iterations: int,
-    options: POVSOptions,
+    options: FullOptions,
     rng: np.random.Generator,
     ngram_degrees: list[int],
 ) -> TVDPerIterResult:
@@ -143,7 +143,7 @@ def tvd_per_iteration(
     samples = np.tile(deck, num_samples).reshape(num_samples, deck_size)
     for i in tqdm(range(max_iterations), desc="Iterations"):
         for sample_id in tqdm(range(num_samples), desc="Samples", leave=False):
-            pov_shuffle(samples[sample_id], iterations=1, seed=rng, options=options)
+            shuffle(samples[sample_id], iterations=1, seed=rng, options=options)
         tvds[i] = get_tvd(samples)
         ngram_tvds[i, :] = np.array([get_ngram_tvd(samples, n) for n in ngram_degrees])
 

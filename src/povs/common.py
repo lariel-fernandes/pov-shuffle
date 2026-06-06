@@ -4,7 +4,7 @@ import math
 import numpy as np
 import torch
 
-from povs import POVSOptions
+from povs import FullOptions
 from povs.constants import ALLOWED_VIRTUAL_BLOCK_SIZES, MIN_OFFSETS, MIN_PBLOCK_SIZE
 from povs.utils import is_power_of_2, least_factor_to_make_multiple
 
@@ -20,7 +20,7 @@ def get_instance_size(dataset: np.ndarray | torch.Tensor) -> int:
 
 def povs_preflight(
     iterations: int,
-    options: POVSOptions,
+    options: FullOptions,
 ) -> None:
     """Common validations and preparations before running any POV Shuffle implementation."""
 

@@ -1,13 +1,13 @@
 from typing import NamedTuple
 
-from povs import POVSOptions
+from povs import FullOptions
 
 
 class OptionsSetEntry(NamedTuple):
     """A labeled POV Shuffle options configuration for use in timing experiments."""
 
     label: str
-    options: POVSOptions
+    options: FullOptions
 
 
 class TimePerDeckSizeParams(NamedTuple):
@@ -28,7 +28,7 @@ class TimePerDeckSizeParams(NamedTuple):
     instance_size: int
     num_runs: int
     num_warmup_runs: int
-    povs_options_per_deck_size: dict[int, POVSOptions]
+    povs_options_per_deck_size: dict[int, FullOptions]
 
 
 class TimePerOptionsParams(NamedTuple):
@@ -68,4 +68,4 @@ class TVDPerIterParams(NamedTuple):
     deck_size: int
     max_iterations: int
     ngram_degrees: list[int]
-    povs_options: POVSOptions
+    povs_options: FullOptions

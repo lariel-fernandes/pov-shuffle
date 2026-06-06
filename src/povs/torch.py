@@ -14,7 +14,7 @@ from .constants import (
     MIN_SEED,
     MIN_VBLOCK_SIZE,
 )
-from .types import POVSOptions
+from .types import FullOptions, Options
 from .utils import (
     is_power_of_2,
     round_down_to_multiple,
@@ -22,10 +22,10 @@ from .utils import (
 )
 
 
-def pov_shuffle(
+def shuffle(
     data: torch.Tensor,
     iterations: int = 1,
-    options: POVSOptions | None = None,
+    options: FullOptions | None = None,
     seed: int | torch.Generator | None = None,
 ) -> None:
     """POV Shuffle implementation for torch tensors on CUDA.
@@ -45,7 +45,7 @@ def pov_shuffle(
     assert (device.major, device.minor) >= MIN_CUDA_ARCH
 
     # Resolve options
-    options = options or choose_options_for_dataset(data)
+    options = options or optim_options_for_dataset(data)
 
     # Coerce to numerical seed
     seed = seed if isinstance(seed, int) else int(torch.randint(MIN_SEED, MAX_SEED, (1,), generator=seed).item())
@@ -71,16 +71,28 @@ def pov_shuffle(
     )
 
 
-def choose_options_for_dataset(data: torch.Tensor) -> POVSOptions:
+def optim_options_for_dataset(
+    data: torch.Tensor,
+    partial_options: Options | None = None,
+) -> FullOptions:
     """Choose POV Shuffle options for dataset."""
     assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
     instance_size = get_instance_size(data)
     dtype_bytes = get_dtype_bytes(data)
 
-    return POVSOptions(
-        virtual_block_size=(vblk := MIN_VBLOCK_SIZE),
-        physical_block_size=(pblk := choose_pblock_size(instance_size, dtype_bytes, vblk, device_id)),
-        offsets=choose_offsets(instance_size, dtype_bytes, pblk),
+    partial_options = partial_options or Options()
+
+    return FullOptions(
+        virtual_block_size=(vblk := partial_options.virtual_block_size or MIN_VBLOCK_SIZE),
+        physical_block_size=(
+            pblk := partial_options.physical_block_size
+            or choose_pblock_size(instance_size, dtype_bytes, vblk, device_id)
+        ),
+        offsets=choose_offsets(
+            instance_size=instance_size,
+            dtype_bytes=dtype_bytes,
+            pblock_size=pblk,
+        ),
     )
 
 

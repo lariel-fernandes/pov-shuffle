@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from povs import POVSOptions
+from povs import FullOptions
 from povs.common import get_block_counts
 
 from ..exercises import tvd_per_iteration
@@ -20,7 +20,7 @@ params = TVDPerIterParams(
     deck_size=1024,
     max_iterations=6,
     ngram_degrees=[2, 3],
-    povs_options=POVSOptions(
+    povs_options=FullOptions(
         physical_block_size=32,
         virtual_block_size=3,
         offsets=[0, 4, 8, 12, 16, 20, 24, 32],
