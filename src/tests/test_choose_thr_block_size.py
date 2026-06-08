@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from povs.torch import choose_thr_block_size
+from povs.torch import _choose_thr_block_size
 
 
 @dataclass(frozen=True)
@@ -115,7 +115,7 @@ def test_choose_thr_block_size(case: _Case) -> None:
         minor=case.device_minor,
     )
     with patch("povs.torch.torch.cuda.get_device_properties", return_value=dev):
-        result = choose_thr_block_size(
+        result = _choose_thr_block_size(
             case.instance_size, case.dtype_bytes, case.vblock_size, case.pblock_size, device_id=0
         )
     assert result == case.expected

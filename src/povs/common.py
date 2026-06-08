@@ -4,7 +4,7 @@ import math
 import numpy as np
 import torch
 
-from .constants import ALLOWED_VIRTUAL_BLOCK_SIZES, MAX_SEED, MIN_OFFSETS, MIN_PBLOCK_SIZE, MIN_SEED
+from .constants import MAX_SEED, MIN_OFFSETS, MIN_PBLOCK_SIZE, MIN_SEED, MIN_VBLOCK_SIZE
 from .types import FullOptions
 from .utils import is_power_of_2, least_factor_to_make_multiple
 
@@ -32,15 +32,27 @@ def get_instance_size(dataset: np.ndarray | torch.Tensor) -> int:
 
 
 def povs_preflight(
+    data: np.ndarray | torch.Tensor,
     iterations: int,
     options: FullOptions,
 ) -> None:
     """Common validations and preparations before running any POV Shuffle implementation."""
 
     assert iterations >= 1
+    _validate_vblock_size(options.virtual_block_size)
     _validate_pblock_size(options.physical_block_size)
-    assert options.virtual_block_size in ALLOWED_VIRTUAL_BLOCK_SIZES
-    _validate_offsets(options.offsets, options.physical_block_size)
+    _validate_offsets(
+        options.offsets,
+        deck_size=data.shape[0],
+        instance_size=get_instance_size(data),
+        dtype_bytes=get_dtype_bytes(data),
+        pblock_size=options.physical_block_size,
+    )
+
+
+def _validate_vblock_size(vblock_size: int) -> None:
+    assert is_power_of_2(vblock_size)
+    assert vblock_size >= MIN_VBLOCK_SIZE
 
 
 def _validate_pblock_size(pblock_size: int) -> None:
@@ -48,9 +60,40 @@ def _validate_pblock_size(pblock_size: int) -> None:
     assert pblock_size >= MIN_PBLOCK_SIZE
 
 
-def _validate_offsets(offsets: list[int], pblock_size: int) -> None:
+def _validate_offsets(
+    offsets: list[int],
+    deck_size: int,
+    instance_size: int,
+    dtype_bytes: int,
+    pblock_size: int,
+) -> None:
     assert len(offsets) >= MIN_OFFSETS
-    assert all(x == 0 or x % pblock_size != 0 for x in offsets), "Offset cannot be multiple of physical block size"
+    for offset in offsets:
+        less_than_deck_size, zero_or_not_divisible_by_pblk, preserves_alignment = _offset_is_valid(
+            offset,
+            deck_size=deck_size,
+            instance_size=instance_size,
+            dtype_bytes=dtype_bytes,
+            pblock_size=pblock_size,
+        )
+        assert less_than_deck_size
+        assert zero_or_not_divisible_by_pblk
+        assert preserves_alignment
+
+
+def _offset_is_valid(
+    offset: int,
+    deck_size: int,
+    instance_size: int,
+    dtype_bytes: int,
+    pblock_size: int,
+) -> tuple[bool, bool, bool]:
+    instance_bits = instance_size * dtype_bytes * 8
+
+    less_than_deck_size = offset < deck_size
+    zero_or_not_divisible_by_pblk = offset == 0 or offset % pblock_size != 0
+    preserves_alignment = is_power_of_2(offset_bits := offset * instance_bits) and offset_bits >= 16
+    return less_than_deck_size, zero_or_not_divisible_by_pblk, preserves_alignment
 
 
 def get_block_counts(

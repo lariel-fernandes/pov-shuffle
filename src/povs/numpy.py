@@ -1,7 +1,7 @@
 import numpy as np
 
 from .common import choose_offsets, get_block_counts, get_dtype_bytes, get_instance_size, povs_preflight
-from .constants import MIN_PBLOCK_SIZE, MIN_VBLOCK_SIZE
+from .constants import MAX_SEED, MIN_PBLOCK_SIZE, MIN_SEED, MIN_VBLOCK_SIZE
 from .types import FullOptions, Options
 
 
@@ -22,11 +22,10 @@ def shuffle(
     :param options: POV Shuffle algorithm options.
     :param seed: Random seed or random number generator state.
     """
+    preflight(data, iterations, options)
+
     # Init random generator
     rng = np.random.default_rng(seed)
-
-    # Validate parameters
-    povs_preflight(iterations, options)
 
     # Block count arithmetic
     n_pblocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
@@ -40,7 +39,7 @@ def shuffle(
         rng.shuffle(vbid_2_bids)
         vbid_2_bids = vbid_2_bids.reshape((n_vblocks, options.virtual_block_size))
 
-        seeds = rng.integers(0, 1000, size=n_vblocks)  # random seed for each virtual block
+        seeds: np.ndarray = rng.integers(MIN_SEED, MAX_SEED, size=n_vblocks)  # random seed for each virtual block
         offset = options.offsets[rng.integers(0, len(options.offsets))]  # Sample a pblocks start offset
 
         def _worker(vbid: int):
@@ -64,12 +63,20 @@ def shuffle(
         np.vectorize(_worker)(np.arange(n_vblocks))  # Process all virtual blocks
 
 
+def preflight(
+    data: np.ndarray,
+    iterations: int,
+    options: FullOptions,
+) -> None:
+    povs_preflight(data, iterations, options)
+
+
 def optim_options_for_dataset(
     data: np.ndarray,
     partial_options: Options,
 ) -> FullOptions:
     """Choose POV Shuffle options for dataset."""
-    assert None in partial_options
+    assert not partial_options.is_fully_specified(cuda_required=False)
     assert (missing := [x is None for x in partial_options]) == sorted(missing)
 
     return FullOptions(
@@ -80,6 +87,7 @@ def optim_options_for_dataset(
             dtype_bytes=get_dtype_bytes(data),
             pblock_size=pblk,
         ),
+        gpu_thread_block_size=-1,
     )
 
 

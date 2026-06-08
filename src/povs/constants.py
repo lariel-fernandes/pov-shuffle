@@ -16,8 +16,7 @@ MIN_PBLOCK_SIZE = 16
 # - Being a power of 2
 # - Not exceeding pblock size
 # - Being a divisor of pblock size
-ALLOWED_VIRTUAL_BLOCK_SIZES = (2, 4, 8, 16)
-MIN_VBLOCK_SIZE = min(ALLOWED_VIRTUAL_BLOCK_SIZES)
+MIN_VBLOCK_SIZE = 2
 
 MIN_CUDA_ARCH = (7, 5)
 MAX_BLOCK_SIZE = 1024

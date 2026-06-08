@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from povs.torch import choose_pblock_size
+from povs.torch import _choose_pblock_size
 
 
 @dataclass(frozen=True)
@@ -97,5 +97,5 @@ def test_choose_pblock_size(case: _Case) -> None:
         shared_memory_per_multiprocessor=case.sm_smem_bytes,
     )
     with patch("povs.torch.torch.cuda.get_device_properties", return_value=dev):
-        result = choose_pblock_size(case.instance_size, case.dtype_bytes, case.vblock_size, device_id=0)
+        result = _choose_pblock_size(case.instance_size, case.dtype_bytes, case.vblock_size, device_id=0)
     assert result == case.expected

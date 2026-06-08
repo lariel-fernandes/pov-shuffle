@@ -34,10 +34,15 @@ def shuffle(
     # Use numpy implementation for CPU tensors
     if isinstance(data, t.Tensor) and data.get_device() == -1:
         data = data.numpy()
+    is_numpy = isinstance(data, np.ndarray)
 
     # Resolve options
     options = options or Options()
-    options = optim_options_for_dataset(data, options) if None in options else FullOptions(*options)
+    options = (
+        FullOptions(*options)
+        if options.is_fully_specified(cuda_required=not is_numpy)
+        else optim_options_for_dataset(data, options)
+    )
 
     # Dispatch shuffle
     if isinstance(data, np.ndarray):
@@ -53,9 +58,15 @@ def optim_options_for_dataset(
     partial_options: Options | None = None,
 ) -> FullOptions:
     """Choose POV Shuffle options for dataset."""
+
+    # Use numpy implementation for CPU tensors
+    if isinstance(data, t.Tensor) and data.get_device() == -1:
+        data = data.numpy()
+    is_numpy = isinstance(data, np.ndarray)
+
     partial_options = partial_options or Options()
 
-    if None not in partial_options:
+    if partial_options.is_fully_specified(cuda_required=not is_numpy):
         warnings.warn("All parameters already specified, skipping optimization")
         return FullOptions(*partial_options)
 
@@ -64,10 +75,6 @@ def optim_options_for_dataset(
             warnings.warn(f"Upstream param {param} is not specified, ignoring specification of downstream params")
             partial_options = Options(*partial_options[: i + 1])
             break
-
-    # Use numpy implementation for CPU tensors
-    if isinstance(data, t.Tensor) and data.get_device() == -1:
-        data = data.numpy()
 
     if isinstance(data, np.ndarray):
         return povs_numpy.optim_options_for_dataset(data, partial_options)

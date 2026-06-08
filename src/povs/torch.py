@@ -33,17 +33,7 @@ def shuffle(
     :param options: POV Shuffle algorithm options.
     :param seed: Random seed or random number generator state.
     """
-    # Dataset preflight
-    assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
-    assert data.dtype in (torch.float16, torch.float32, torch.float64, torch.int32, torch.int64)
-    assert data.is_contiguous()
-
-    # Device preflight
-    device = torch.cuda.get_device_properties(device_id)
-    assert (device.major, device.minor) >= MIN_CUDA_ARCH
-
-    # Validate parameters
-    povs_preflight(iterations, options)
+    preflight(data, iterations, options)
 
     # Delegate to bound CUDA library
     torch_binding(
@@ -53,14 +43,35 @@ def shuffle(
         options.physical_block_size,
         options.virtual_block_size,
         seed,
-        choose_thr_block_size(
-            instance_size=get_instance_size(data),
-            dtype_bytes=get_dtype_bytes(data),
-            vblock_size=options.virtual_block_size,
-            pblock_size=options.physical_block_size,
-            device_id=device_id,
-        ),
+        options.gpu_thread_block_size,
     )
+
+
+def preflight(
+    data: torch.Tensor,
+    iterations: int,
+    options: FullOptions,
+) -> None:
+    """Preflight checks for POV Shuffle on torch tensors."""
+    # TODO: ensure that each of the following validation blocks has exactly one matching validation block in c++ code within src/povs/__cuda/ sources, with each block hinting to the respective python module (by fully qualified module name) and code region that needs to be kept in sync
+
+    # Standard preflight  # TODO: replicate with static assertions for pblock and vblock sizes only, in povs.cu, as soon as these are available as template parameters
+    povs_preflight(data, iterations, options)
+
+    # Dataset preflight  # TODO: replicate with TORCH_CHECK in binds/torch.cpp using runtime variables obtained from inspecting the tensor
+    assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
+    assert data.dtype in (torch.float16, torch.float32, torch.float64, torch.int32, torch.int64)
+    assert data.is_contiguous()
+
+    # Device preflight  # TODO: replicate with static assertions in povs.cu as soon as gpu architecture becomes available as constexpr
+    device = torch.cuda.get_device_properties(device_id)
+    assert (device.major, device.minor) >= MIN_CUDA_ARCH
+
+    # GPU thread-block preflight # TODO: replicate with static assertions in povs.cu as soon as gpu thread block size becomes available as constexpr
+    instances_per_block = options.physical_block_size * options.virtual_block_size
+    assert options.gpu_thread_block_size <= MAX_BLOCK_SIZE
+    assert options.gpu_thread_block_size <= instances_per_block
+    assert is_power_of_2(options.gpu_thread_block_size)
 
 
 def optim_options_for_dataset(
@@ -68,7 +79,7 @@ def optim_options_for_dataset(
     partial_options: Options,
 ) -> FullOptions:
     """Choose POV Shuffle options for dataset."""
-    assert None in partial_options
+    assert not partial_options.is_fully_specified(cuda_required=True)
     assert (missing := [x is None for x in partial_options]) == sorted(missing)
 
     assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
@@ -79,17 +90,24 @@ def optim_options_for_dataset(
         virtual_block_size=(vblk := partial_options.virtual_block_size or MIN_VBLOCK_SIZE),
         physical_block_size=(
             pblk := partial_options.physical_block_size
-            or choose_pblock_size(instance_size, dtype_bytes, vblk, device_id)
+            or _choose_pblock_size(instance_size, dtype_bytes, vblk, device_id)
         ),
         offsets=choose_offsets(
             instance_size=instance_size,
             dtype_bytes=dtype_bytes,
             pblock_size=pblk,
         ),
+        gpu_thread_block_size=_choose_thr_block_size(
+            instance_size=instance_size,
+            dtype_bytes=dtype_bytes,
+            vblock_size=vblk,
+            pblock_size=pblk,
+            device_id=device_id,
+        ),
     )
 
 
-def choose_pblock_size(
+def _choose_pblock_size(
     instance_size: int,
     dtype_bytes: int,
     vblock_size: int,
@@ -145,7 +163,7 @@ def choose_pblock_size(
     return lower_pblk_size if occ_diff_at_lower_pblk_size < occ_diff_at_upper_pblk_size else upper_pblk_size
 
 
-def choose_thr_block_size(
+def _choose_thr_block_size(
     instance_size: int,
     dtype_bytes: int,
     vblock_size: int,
