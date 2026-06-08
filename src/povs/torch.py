@@ -54,6 +54,7 @@ def preflight(
 ) -> None:
     """Preflight checks for POV Shuffle on torch tensors."""
     # TODO: ensure that each of the following validation blocks has exactly one matching validation block in c++ code within src/povs/__cuda/ sources, with each block hinting to the respective python module (by fully qualified module name) and code region that needs to be kept in sync
+    #       also add brief hints to each of the blocks below linking them to the respective in sync blocks from the c++ sources
 
     # Standard preflight  # TODO: replicate with static assertions for pblock and vblock sizes only, in povs.cu, as soon as these are available as template parameters
     povs_preflight(data, iterations, options)

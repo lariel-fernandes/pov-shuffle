@@ -1,13 +1,11 @@
 
 ## Tasks
-debug:
-- [ ] ensure a larger than deck offset gets wrapped around as many times as necessary
-
 testing:
-- [ ] review unit tests:
+- [ ] run unit tests for offset choices
+- [ ] review, run and possibly fix unit tests:
   - [ ] pblk size choice
   - [ ] thr blk size choice
-  - [ ] povs with partial or full inference of algorithm options (set to zero or empty to trigger inference)
+  - [ ] povs with partial or full inference of algorithm options
 - [ ] consider using xorshift32 in numpy workers to have reproducibility of the CUDA implementation (might also need to switch the host-side rng engine)
 
 evaluation:
