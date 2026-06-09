@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from povs.torch import _choose_thr_block_size
+from povs.torch import _choose_thr_block_size  # noqa
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class _Case:
 @pytest.mark.parametrize(
     "case",
     [
-        pytest.param(case, id=i)
+        pytest.param(case, id=str(i))
         for i, case in enumerate([
             # raw=min(64,64,128)=64; 64>32, 64%32=0 → no rounding; result equals target
             _Case(

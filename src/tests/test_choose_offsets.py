@@ -8,6 +8,7 @@ from povs.common import _validate_offsets, _validate_pblock_size, choose_offsets
 
 @dataclass
 class _Case:
+    deck_size: int
     instance_size: int
     dtype_bytes: int
     pblock_size: int
@@ -28,6 +29,7 @@ class _Case:
         for case in [
             _Case(*vals)
             for vals in product(
+                [16, 32],  # deck_size
                 [1, 2, 4],  # instance_size
                 [16, 32, 64],  # dtype_bytes
                 [16, 32, 64],  # pblock_size
@@ -38,5 +40,5 @@ class _Case:
 )
 def test_choose_offsets(case: _Case) -> None:
     _validate_pblock_size(case.pblock_size)
-    offsets = choose_offsets(case.instance_size, case.dtype_bytes, case.pblock_size, case.max_offsets)
-    _validate_offsets(offsets, case.pblock_size)
+    offsets = choose_offsets(case.deck_size, case.instance_size, case.dtype_bytes, case.pblock_size, case.max_offsets)
+    _validate_offsets(offsets, case.deck_size, case.instance_size, case.dtype_bytes, case.pblock_size)

@@ -4,7 +4,15 @@ import math
 import numpy as np
 import torch
 
-from .constants import MAX_SEED, MIN_OFFSETS, MIN_PBLOCK_SIZE, MIN_SEED, MIN_VBLOCK_SIZE
+from .constants import (
+    MAX_MEM_ALIGNMENT_BITS,
+    MAX_SEED,
+    MIN_MEM_ALIGNMENT_BITS,
+    MIN_OFFSETS,
+    MIN_PBLOCK_SIZE,
+    MIN_SEED,
+    MIN_VBLOCK_SIZE,
+)
 from .types import FullOptions
 from .utils import is_power_of_2, least_factor_to_make_multiple
 
@@ -38,12 +46,14 @@ def povs_preflight(
 ) -> None:
     """Common validations and preparations before running any POV Shuffle implementation."""
 
+    assert data.ndim >= 1, f"dataset must have at least one dimension, but has {data.ndim}"
+    assert (deck_size := data.shape[0]) >= 2, f"dataset must have at least 2 instances, but has {deck_size}"
     assert iterations >= 1, f"iterations ({iterations}) must be at least 1"
     _validate_vblock_size(options.virtual_block_size)
     _validate_pblock_size(options.physical_block_size)
     _validate_offsets(
         options.offsets,
-        deck_size=data.shape[0],
+        deck_size=deck_size,
         instance_size=get_instance_size(data),
         dtype_bytes=get_dtype_bytes(data),
         pblock_size=options.physical_block_size,
@@ -80,7 +90,9 @@ def _validate_offsets(
         prefix = f"offset at index {i} ({offset})"
         assert less_than_deck_size, f"{prefix} must be less than deck size {deck_size}"
         assert zero_or_not_divisible_by_pblk, f"{prefix} must be zero or not divisible by pblock size {pblock_size}"
-        assert preserves_alignment, f"{prefix} * instance_bits ({instance_bits}) must be a power of 2 and at least 16"
+        assert preserves_alignment, (
+            f"{prefix} * instance_bits ({instance_bits}) must be a multiple of the minimum memory alignment ({MIN_MEM_ALIGNMENT_BITS}bits)"
+        )
 
 
 def _offset_is_valid(
@@ -91,7 +103,7 @@ def _offset_is_valid(
 ) -> tuple[bool, bool, bool]:
     less_than_deck_size = offset < deck_size
     zero_or_not_divisible_by_pblk = offset == 0 or offset % pblock_size != 0
-    preserves_alignment = is_power_of_2(offset_bits := offset * instance_bits) and offset_bits >= 16
+    preserves_alignment = offset * instance_bits % MIN_MEM_ALIGNMENT_BITS == 0
     return less_than_deck_size, zero_or_not_divisible_by_pblk, preserves_alignment
 
 
@@ -109,6 +121,7 @@ def get_block_counts(
 
 
 def choose_offsets(
+    deck_size: int,
     instance_size: int,
     dtype_bytes: int,
     pblock_size: int,
@@ -123,7 +136,7 @@ def choose_offsets(
     max_offsets = max_offsets or MIN_OFFSETS
 
     instance_bits = instance_size * dtype_bytes * 8
-    base_offset = _choose_base_offset(instance_bits, pblock_size)
+    base_offset = _choose_base_offset(instance_bits, pblock_size, deck_size)
 
     offsets = []
     rests = set()
@@ -141,13 +154,16 @@ def choose_offsets(
 def _choose_base_offset(
     instance_bits: int,
     pblock_size: int,
-    alignment: int = 128,
+    deck_size: int,
+    alignment: int = MAX_MEM_ALIGNMENT_BITS,
 ) -> int:
     base_offset = least_factor_to_make_multiple(instance_bits, alignment)
 
-    if base_offset % pblock_size == 0:
-        if alignment > 16:
-            return _choose_base_offset(instance_bits, pblock_size, alignment // 2)
-        raise ValueError("Cannot find a memory-aligned base offset that is not a multiple of the physical block size")
+    if base_offset % pblock_size == 0 or base_offset >= deck_size:
+        if alignment > MIN_MEM_ALIGNMENT_BITS:
+            return _choose_base_offset(instance_bits, pblock_size, deck_size, alignment // 2)
+        raise ValueError(
+            "Cannot find a memory-aligned base offset that is less than the dataset size and not a multiple of the physical block size"
+        )
 
     return base_offset

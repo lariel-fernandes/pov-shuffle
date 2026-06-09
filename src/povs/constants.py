@@ -18,6 +18,12 @@ MIN_PBLOCK_SIZE = 16
 # - Being a divisor of pblock size
 MIN_VBLOCK_SIZE = 2
 
+# Offset bits must be a multiple of at least this number in order to allow vectorized copy to SM shared memory
+MIN_MEM_ALIGNMENT_BITS = 16
+
+# Maximum copy vectorization to SM shared memory occurs when offset bits is a multiple of this number
+MAX_MEM_ALIGNMENT_BITS = 128
+
 MIN_CUDA_ARCH = (7, 5)
 MAX_BLOCK_SIZE = 1024
 

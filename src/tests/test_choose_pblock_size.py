@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from povs.torch import _choose_pblock_size
+from povs.torch import _choose_pblock_size  # noqa
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class _Case:
 @pytest.mark.parametrize(
     "case",
     [
-        pytest.param(case, id=i)
+        pytest.param(case, id=str(i))
         for i, case in enumerate([
             # instances_per_sm=2048, thr_blocks=32, instances_per_thr_block=64, pblock=32 → exact power of 2 (early return)
             _Case(
