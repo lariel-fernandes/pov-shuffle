@@ -1,7 +1,6 @@
 
 ## Tasks
 testing:
-- [ ] run unit tests for offset choices
 - [ ] review, run and possibly fix unit tests:
   - [ ] pblk size choice
   - [ ] thr blk size choice
