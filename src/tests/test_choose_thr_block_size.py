@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from povs.torch import _choose_thr_block_size  # noqa
+from povs.common import _validate_pblock_size, _validate_vblock_size  # noqa
+from povs.torch import _choose_thr_block_size, _validate_thr_block_size  # noqa
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,6 @@ class _Case:
     max_threads_per_sm: int
     device_major: int
     device_minor: int
-    expected: int
 
 
 # Arithmetic key (for cases using instance_size=1, dtype_bytes=4):
@@ -42,7 +42,6 @@ class _Case:
                 max_threads_per_sm=2048,
                 device_major=9,
                 device_minor=0,
-                expected=64,
             ),
             # max_thr_blk=64, max_thr_per_blk=32; raw=min(64,32,32)=32; 32>16, 32%16=0 → no rounding; capped by pblock×vblock
             _Case(
@@ -54,7 +53,6 @@ class _Case:
                 max_threads_per_sm=2048,
                 device_major=9,
                 device_minor=0,
-                expected=32,
             ),
             # max_thr_blk=32, max_thr_per_blk=48; raw=min(64,48,64)=48; 48>32, 48%32≠0 → round_down_to_multiple(48,32)=32
             _Case(
@@ -66,7 +64,6 @@ class _Case:
                 max_threads_per_sm=1536,
                 device_major=9,
                 device_minor=0,
-                expected=32,
             ),
             # max_thr_blk=32, max_thr_per_blk=24; raw=min(64,24,64)=24; 24<32, 32%24≠0 → round_down_to_power_of_2(24)=16
             _Case(
@@ -78,7 +75,6 @@ class _Case:
                 max_threads_per_sm=768,
                 device_major=9,
                 device_minor=0,
-                expected=16,
             ),
             # max_thr_blk=32, max_thr_per_blk=16; raw=min(64,16,64)=16; 16<32, 32%16=0 → no rounding; exact divisor
             _Case(
@@ -90,7 +86,6 @@ class _Case:
                 max_threads_per_sm=512,
                 device_major=9,
                 device_minor=0,
-                expected=16,
             ),
             # CC (8,0): target_thr_block_size=64; max_thr_blk=16, max_thr_per_blk=128; raw=min(64,128,64)=64; 64>32, 64%32=0 → no rounding
             _Case(
@@ -102,7 +97,6 @@ class _Case:
                 max_threads_per_sm=2048,
                 device_major=8,
                 device_minor=0,
-                expected=64,
             ),
         ])
     ],
@@ -114,8 +108,12 @@ def test_choose_thr_block_size(case: _Case) -> None:
         major=case.device_major,
         minor=case.device_minor,
     )
+
+    _validate_vblock_size(case.vblock_size)
+    _validate_pblock_size(case.pblock_size)
+
     with patch("povs.torch.torch.cuda.get_device_properties", return_value=dev):
-        result = _choose_thr_block_size(
+        thr_block_size = _choose_thr_block_size(
             case.instance_size, case.dtype_bytes, case.vblock_size, case.pblock_size, device_id=0
         )
-    assert result == case.expected
+        _validate_thr_block_size(thr_block_size, case.vblock_size, case.pblock_size)

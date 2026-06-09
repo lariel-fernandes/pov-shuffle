@@ -68,12 +68,7 @@ def preflight(
     povs_preflight(data, iterations, options)
 
     # GPU thread-block preflight  # In sync with: src/povs/__cuda/lib/povs.cu — thread-block preflight
-    prefix = f"thread-block size ({options.gpu_thread_block_size})"
-    assert is_power_of_2(options.gpu_thread_block_size), f"{prefix} must be a power of 2"
-    assert options.gpu_thread_block_size <= MAX_BLOCK_SIZE, f"{prefix} must not exceed {MAX_BLOCK_SIZE}"
-    assert options.gpu_thread_block_size <= (total := options.physical_block_size * options.virtual_block_size), (
-        f"{prefix} must not exceed total instances ({total})"
-    )
+    _validate_thr_block_size(options.gpu_thread_block_size, options.physical_block_size, options.virtual_block_size)
 
 
 def optim_options_for_dataset(
@@ -107,6 +102,17 @@ def optim_options_for_dataset(
             device_id=device_id,
         ),
     )
+
+
+def _validate_thr_block_size(
+    thr_block_size: int,
+    vblock_size: int,
+    pblock_size: int,
+) -> None:
+    prefix = f"thread-block size ({thr_block_size})"
+    assert is_power_of_2(thr_block_size), f"{prefix} must be a power of 2"
+    assert thr_block_size <= MAX_BLOCK_SIZE, f"{prefix} must not exceed {MAX_BLOCK_SIZE}"
+    assert thr_block_size <= (total := vblock_size * pblock_size), f"{prefix} must not exceed total instances ({total})"
 
 
 def _choose_pblock_size(
