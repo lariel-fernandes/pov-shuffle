@@ -38,7 +38,7 @@ def povs_preflight(
 ) -> None:
     """Common validations and preparations before running any POV Shuffle implementation."""
 
-    assert iterations >= 1
+    assert iterations >= 1, f"iterations ({iterations}) must be at least 1"
     _validate_vblock_size(options.virtual_block_size)
     _validate_pblock_size(options.physical_block_size)
     _validate_offsets(
@@ -51,13 +51,13 @@ def povs_preflight(
 
 
 def _validate_vblock_size(vblock_size: int) -> None:
-    assert is_power_of_2(vblock_size)
-    assert vblock_size >= MIN_VBLOCK_SIZE
+    assert is_power_of_2(vblock_size), f"vblock size ({vblock_size}) must be a power of 2"
+    assert vblock_size >= MIN_VBLOCK_SIZE, f"vblock size ({vblock_size}) must be at least {MIN_VBLOCK_SIZE}"
 
 
 def _validate_pblock_size(pblock_size: int) -> None:
-    assert is_power_of_2(pblock_size)
-    assert pblock_size >= MIN_PBLOCK_SIZE
+    assert is_power_of_2(pblock_size), f"pblock size ({pblock_size}) must be a power of 2"
+    assert pblock_size >= MIN_PBLOCK_SIZE, f"pblock size ({pblock_size}) must be at least {MIN_PBLOCK_SIZE}"
 
 
 def _validate_offsets(
@@ -68,28 +68,27 @@ def _validate_offsets(
     pblock_size: int,
 ) -> None:
     assert len(offsets) >= MIN_OFFSETS
-    for offset in offsets:
+    instance_bits = instance_size * dtype_bytes * 8
+
+    for i, offset in enumerate(offsets):
         less_than_deck_size, zero_or_not_divisible_by_pblk, preserves_alignment = _offset_is_valid(
             offset,
             deck_size=deck_size,
-            instance_size=instance_size,
-            dtype_bytes=dtype_bytes,
+            instance_bits=instance_bits,
             pblock_size=pblock_size,
         )
-        assert less_than_deck_size
-        assert zero_or_not_divisible_by_pblk
-        assert preserves_alignment
+        prefix = f"offset at index {i} ({offset})"
+        assert less_than_deck_size, f"{prefix} must be less than deck size {deck_size}"
+        assert zero_or_not_divisible_by_pblk, f"{prefix} must be zero or not divisible by pblock size {pblock_size}"
+        assert preserves_alignment, f"{prefix} * instance_bits ({instance_bits}) must be a power of 2 and at least 16"
 
 
 def _offset_is_valid(
     offset: int,
     deck_size: int,
-    instance_size: int,
-    dtype_bytes: int,
+    instance_bits: int,
     pblock_size: int,
 ) -> tuple[bool, bool, bool]:
-    instance_bits = instance_size * dtype_bytes * 8
-
     less_than_deck_size = offset < deck_size
     zero_or_not_divisible_by_pblk = offset == 0 or offset % pblock_size != 0
     preserves_alignment = is_power_of_2(offset_bits := offset * instance_bits) and offset_bits >= 16

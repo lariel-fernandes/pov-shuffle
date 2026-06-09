@@ -55,21 +55,25 @@ def preflight(
     """Preflight checks for POV Shuffle on torch tensors."""
 
     # Dataset preflight  # In sync with: src/povs/__cuda/binds/torch.cpp — dataset preflight
+    dtypes = (torch.float16, torch.float32, torch.float64, torch.int32, torch.int64)
     assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
-    assert data.dtype in (torch.float16, torch.float32, torch.float64, torch.int32, torch.int64)
-    assert data.is_contiguous()
+    assert data.dtype in dtypes, f"Invalid dtype {data.dtype.__str__()}, must be one of {dtypes}"
+    assert data.is_contiguous(), "Tensor must be contiguous"
 
     # Device preflight  # In sync with: src/povs/__cuda/lib/povs.cu — device preflight
-    device = torch.cuda.get_device_properties(device_id)
-    assert (device.major, device.minor) >= MIN_CUDA_ARCH
+    dev = torch.cuda.get_device_properties(device_id)
+    assert (arch := (dev.major, dev.minor)) >= MIN_CUDA_ARCH, f"CUDA arch {arch} must be at least {MIN_CUDA_ARCH}"
 
     # Standard preflight  # In sync with: src/povs/__cuda/lib/povs.cu — standard preflight
     povs_preflight(data, iterations, options)
 
     # GPU thread-block preflight  # In sync with: src/povs/__cuda/lib/povs.cu — thread-block preflight
-    assert is_power_of_2(options.gpu_thread_block_size)
-    assert options.gpu_thread_block_size <= MAX_BLOCK_SIZE
-    assert options.gpu_thread_block_size <= options.physical_block_size * options.virtual_block_size
+    prefix = f"thread-block size ({options.gpu_thread_block_size})"
+    assert is_power_of_2(options.gpu_thread_block_size), f"{prefix} must be a power of 2"
+    assert options.gpu_thread_block_size <= MAX_BLOCK_SIZE, f"{prefix} must not exceed {MAX_BLOCK_SIZE}"
+    assert options.gpu_thread_block_size <= (total := options.physical_block_size * options.virtual_block_size), (
+        f"{prefix} must not exceed total instances ({total})"
+    )
 
 
 def optim_options_for_dataset(
