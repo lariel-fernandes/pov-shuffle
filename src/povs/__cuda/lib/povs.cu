@@ -128,13 +128,16 @@ __global__ void povs_kernel(
     const int seed = Sg_ptr[vblock_id];
     constexpr int CudaArch = get_cuda_arch();
 
-    // Static assertions
+    // Device preflight — keep in sync with povs.torch.preflight, device section
     {
-        // clang-format off
         CUTE_STATIC_ASSERT(CudaArch >= MIN_CUDA_ARCH, "Unsupported CUDA architecture");
-        CUTE_STATIC_ASSERT(PBlockSize < BlockSize || PBlockSize % BlockSize == 0, "If PBlockSize > Thread-BlockSize, the former must be divisible by the later");
-        CUTE_STATIC_ASSERT(BlockSize < PBlockSize || BlockSize % PBlockSize == 0, "If Thread-BlockSize > PBlockSize, the former must be divisible by the later");
-        // clang-format on
+    }
+
+    // GPU thread-block preflight — keep in sync with povs.torch.preflight, thread-block section
+    {
+        CUTE_STATIC_ASSERT(BlockSize <= MAX_BLOCK_SIZE, "Thread-BlockSize must not exceed MAX_BLOCK_SIZE");
+        CUTE_STATIC_ASSERT(BlockSize > 0 && (BlockSize & (BlockSize - 1)) == 0, "Thread-BlockSize must be a power of 2");
+        CUTE_STATIC_ASSERT(BlockSize <= PBlockSize * VBlockSize, "Thread-BlockSize must not exceed instances per block");
     }
 
     // Define tilers for distributing copy throughput and computation across threads
@@ -363,14 +366,12 @@ void povs_cuda(
     const int block_size
 )
 {
-    // Static assertions
+    // Standard preflight — keep in sync with povs.torch.preflight, standard section
     {
         static_assert(VBlockSize >= MIN_VBLOCK_SIZE, "VBlockSize must be at least 2");
         static_assert(PBlockSize >= MIN_PBLOCK_SIZE, "PBlockSize must be at least 16");
-        static_assert(PBlockSize % VBlockSize == 0, "PBlockSize must be divisible by VBlockSize");
         static_assert(PBlockSize > 0 && (PBlockSize & (PBlockSize - 1)) == 0, "PBlockSize must be a power of 2");
         static_assert(VBlockSize > 0 && (VBlockSize & (VBlockSize - 1)) == 0, "VBlockSize must be a power of 2");
-        static_assert(VBlockSize <= PBlockSize, "VBlockSize must not exceed PBlockSize");
         static_assert(InstanceSize > 0, "InstanceSize must be strictly positive");
     }
 

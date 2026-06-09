@@ -60,7 +60,14 @@ void torch_povs(
     const int seed
 )
 {
+    // Dataset preflight — keep in sync with povs.torch.preflight, dataset section
     TORCH_CHECK(X.is_cuda(), "X must be a CUDA tensor");
+    TORCH_CHECK(X.is_contiguous(), "X must be contiguous");
+    TORCH_CHECK(
+        X.scalar_type() == at::kHalf || X.scalar_type() == at::kFloat || X.scalar_type() == at::kDouble || X.scalar_type() == at::kInt ||
+            X.scalar_type() == at::kLong,
+        "Unsupported data type"
+    );
     TORCH_CHECK(O.is_cpu(), "O must be a CPU tensor");
 
     const long* Oh_ptr = O.data_ptr<long>(); // O pointer in host memory
@@ -79,7 +86,7 @@ void torch_povs(
 
         PBLOCK_SIZE_DISPATCH(pblock_size, [&]() {
             VBLOCK_SIZE_DISPATCH(vblock_size, [&]() {
-                INSTANCE_SIZE_DISPATCH(vblock_size, [&]() {
+                INSTANCE_SIZE_DISPATCH(instance_size, [&]() {
                     // clang-format off
                     (povs_cuda<scalar_t, PBLOCK_SIZE, VBLOCK_SIZE, INSTANCE_SIZE>)(
                         Xg_ptr, num_instances,

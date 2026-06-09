@@ -53,26 +53,23 @@ def preflight(
     options: FullOptions,
 ) -> None:
     """Preflight checks for POV Shuffle on torch tensors."""
-    # TODO: ensure that each of the following validation blocks has exactly one matching validation block in c++ code within src/povs/__cuda/ sources, with each block hinting to the respective python module (by fully qualified module name) and code region that needs to be kept in sync
-    #       also add brief hints to each of the blocks below linking them to the respective in sync blocks from the c++ sources
 
-    # Standard preflight  # TODO: replicate with static assertions for pblock and vblock sizes only, in povs.cu, as soon as these are available as template parameters
-    povs_preflight(data, iterations, options)
-
-    # Dataset preflight  # TODO: replicate with TORCH_CHECK in binds/torch.cpp using runtime variables obtained from inspecting the tensor
+    # Dataset preflight  # In sync with: src/povs/__cuda/binds/torch.cpp — dataset preflight
     assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
     assert data.dtype in (torch.float16, torch.float32, torch.float64, torch.int32, torch.int64)
     assert data.is_contiguous()
 
-    # Device preflight  # TODO: replicate with static assertions in povs.cu as soon as gpu architecture becomes available as constexpr
+    # Device preflight  # In sync with: src/povs/__cuda/lib/povs.cu — device preflight
     device = torch.cuda.get_device_properties(device_id)
     assert (device.major, device.minor) >= MIN_CUDA_ARCH
 
-    # GPU thread-block preflight # TODO: replicate with static assertions in povs.cu as soon as gpu thread block size becomes available as constexpr
-    instances_per_block = options.physical_block_size * options.virtual_block_size
-    assert options.gpu_thread_block_size <= MAX_BLOCK_SIZE
-    assert options.gpu_thread_block_size <= instances_per_block
+    # Standard preflight  # In sync with: src/povs/__cuda/lib/povs.cu — standard preflight
+    povs_preflight(data, iterations, options)
+
+    # GPU thread-block preflight  # In sync with: src/povs/__cuda/lib/povs.cu — thread-block preflight
     assert is_power_of_2(options.gpu_thread_block_size)
+    assert options.gpu_thread_block_size <= MAX_BLOCK_SIZE
+    assert options.gpu_thread_block_size <= options.physical_block_size * options.virtual_block_size
 
 
 def optim_options_for_dataset(
