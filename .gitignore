@@ -1,6 +1,7 @@
 .idea
 .claude
 data/
+src/povs/build_params.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
