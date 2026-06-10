@@ -32,13 +32,18 @@ dev = [
     "pybind11-stubgen >=2.5.5",
 ]
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::UserWarning:povs.torch:",
+]
+
 [tool.setuptools.package-data]
 povs = ["build_params.json"]
 
 [tool.uv]
 reinstall-package = ["pov-shuffle"]
 python-preference = "only-managed"
-extra-build-variables = { pov-shuffle = { POVS_CUDA_INSTANCE_SIZES = "1,8" } }
+extra-build-variables = { pov-shuffle = { POVS_CUDA_INSTANCE_SIZES = "1,8", POVS_CUDA_PBLOCK_SIZES = "16,32" } }
 
 # === Ruff ========================================================================================
 
