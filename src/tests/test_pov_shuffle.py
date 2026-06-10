@@ -34,7 +34,7 @@ class _Case:
             shape = "x".join(map(str, self.instance_shape))
             dev = re.sub(r":.*", "", self.device)
             opts = list(self.options).__repr__().replace(" ", "") if self.options else ""
-            self.id = f"deck{self.deck_size}_shape{shape}_iter{self.iterations}{'_opts' if opts else  ''}{opts}_{dev}"
+            self.id = f"deck{self.deck_size}_shape{shape}_iter{self.iterations}{'_opts' if opts else ''}{opts}_{dev}"
 
 
 @pytest.mark.parametrize(
