@@ -88,6 +88,6 @@ pybind11_stubgen.main(["povs._cuda", "-o", "src"]);
 ```bash
 SRC_DIR=lib PROGRAM=povs make
 ```
-- By default, this compiles and runs the `main` function of [`../__cuda/lib/povs.cu`](./src/povs/__cuda/lib/povs.cu)
-- For running specific test files, use `SRC_DIR=test` and `PROGRAM=file_name`
+- By default, this compiles and runs the `main` function of [`povs.cu`](./src/povs/__cuda/lib/povs.cu)
+- For running specific [test programs](./src/povs/__cuda/test), use `SRC_DIR=test` and `PROGRAM=<file_name>`
 - See `make help` for other options.
