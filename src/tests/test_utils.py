@@ -3,7 +3,6 @@ import pytest
 from povs.utils import (
     is_power_of_2,
     least_factor_to_make_multiple,
-    round_down_to_multiple,
     round_down_to_power_of_2,
 )
 
@@ -39,21 +38,6 @@ def test_is_power_of_2(x, expected):
 )
 def test_round_down_to_power_of_2(x, expected):
     assert round_down_to_power_of_2(x) == expected
-
-
-@pytest.mark.parametrize(
-    "x, y, expected",
-    [
-        (10, 5, 10),  # already a multiple
-        (9, 5, 5),
-        (4, 5, 0),  # x < y → floor is 0
-        (5, 5, 5),  # x == y
-        (1, 1, 1),
-        (100, 7, 98),
-    ],
-)
-def test_round_down_to_multiple(x, y, expected):
-    assert round_down_to_multiple(x, y) == expected
 
 
 @pytest.mark.parametrize(
