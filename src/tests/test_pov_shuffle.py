@@ -9,7 +9,7 @@ import torch
 
 from povs import BuildParams, Options, get_build_params, optim_options_for_dataset, shuffle
 
-_OPTS_SMALL = Options(physical_block_size=16, virtual_block_size=2, offsets=[8, 16])
+_OPTS_SMALL = Options(physical_block_size=16, virtual_block_size=2, offsets=[4, 8])
 
 
 @pytest.fixture(scope="session")
@@ -32,7 +32,7 @@ class _Case:
     def __post_init__(self):
         if self.id is None:
             shape = "x".join(map(str, self.instance_shape))
-            dev = re.sub(r":.*", self.device, "")
+            dev = re.sub(r":.*", "", self.device)
             opts = list(self.options).__repr__().replace(" ", "") if self.options else ""
             self.id = f"deck{self.deck_size}_shape{shape}_iter{self.iterations}_opts{opts}_{dev}"
 
