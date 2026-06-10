@@ -83,6 +83,7 @@ def optim_options_for_dataset(
         virtual_block_size=partial_options.virtual_block_size or MIN_VBLOCK_SIZE,
         physical_block_size=(pblk := partial_options.physical_block_size or MIN_PBLOCK_SIZE),
         offsets=choose_offsets(
+            deck_size=data.shape[0],
             instance_size=get_instance_size(data),
             dtype_bytes=get_dtype_bytes(data),
             pblock_size=pblk,

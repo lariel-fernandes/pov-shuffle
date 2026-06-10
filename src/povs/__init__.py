@@ -72,7 +72,7 @@ def optim_options_for_dataset(
         warnings.warn("All parameters already specified, skipping optimization")
         return FullOptions(*partial_options)
 
-    for i, param in Options._fields:
+    for i, param in enumerate(Options._fields):
         if partial_options[i] is None and any(x is not None for x in partial_options[i + 1 :]):
             warnings.warn(f"Upstream param {param} is not specified, ignoring specification of downstream params")
             partial_options = Options(*partial_options[: i + 1])

@@ -90,6 +90,7 @@ def optim_options_for_dataset(
             or _choose_pblock_size(instance_size, dtype_bytes, vblk, device_id)
         ),
         offsets=choose_offsets(
+            deck_size=data.shape[0],
             instance_size=instance_size,
             dtype_bytes=dtype_bytes,
             pblock_size=pblk,
