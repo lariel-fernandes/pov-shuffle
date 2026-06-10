@@ -5,12 +5,14 @@ import torch as t
 
 from . import numpy as povs_numpy
 from . import torch as povs_torch
-from .common import get_int_seed
-from .types import FullOptions, Options
+from .common import get_build_params, get_int_seed
+from .types import BuildParams, FullOptions, Options
 
 __all__ = [
     "shuffle",
     "Options",
+    "BuildParams",
+    "get_build_params",
     "optim_options_for_dataset",
 ]
 

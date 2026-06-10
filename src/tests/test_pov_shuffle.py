@@ -7,9 +7,15 @@ import numpy as np
 import pytest
 import torch
 
-from povs import FullOptions, shuffle
+from povs import BuildParams, Options, get_build_params, optim_options_for_dataset, shuffle
 
-_OPTS_SMALL = FullOptions(physical_block_size=16, virtual_block_size=2, offsets=[8, 16])
+_OPTS_SMALL = Options(physical_block_size=16, virtual_block_size=2, offsets=[8, 16])
+
+
+@pytest.fixture(scope="session")
+def build_params() -> BuildParams:
+    return get_build_params()
+
 
 _MARK_SKIP_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available")
 
@@ -19,7 +25,7 @@ class _Case:
     deck_size: int
     instance_shape: tuple[int, ...]
     iterations: int
-    options: FullOptions | None
+    options: Options | None
     device: str
     id: str | None = None
 
@@ -61,9 +67,12 @@ class _Case:
         ],
     ],
 )
-def test_pov_shuffle(case: _Case) -> None:
+def test_pov_shuffle(case: _Case, build_params: BuildParams) -> None:
     data = _make_deck(case.deck_size, case.instance_shape, case.device)
-    shuffle(data, iterations=case.iterations, options=case.options, seed=42)
+    options = optim_options_for_dataset(data) if case.options is None else case.options
+    if options.physical_block_size not in build_params.pblock_sizes:
+        pytest.skip(f"pblock_size={options.physical_block_size} not compiled in {build_params.pblock_sizes}")
+    shuffle(data, iterations=case.iterations, options=options, seed=42)
     _check_integrity(data, case.deck_size, case.instance_shape)
 
 

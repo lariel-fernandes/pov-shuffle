@@ -9,9 +9,17 @@ while sufficiently approximating a uniform shuffle within few iterations.
 ```python
 import povs
 
+# Optional: Optimize algorithm options once for the dataset, to avoid
+# overhead when calling `povs.shuffle` multiple times on the same dataset.
+options = povs.optim_options_for_dataset(
+    dataset,  # A numpy array or PyTorch tensor
+)
+
+# Shuffle the dataset in place
 povs.shuffle(
-    data,  # A numpy array or PyTorch tensor
+    dataset,  # A numpy array or PyTorch tensor
     iterations=3,
+    options=options,
 )
 ```
 - See `help(povs.shuffle)` for more details.

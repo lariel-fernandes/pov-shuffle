@@ -1,4 +1,5 @@
 import itertools
+import json
 import os
 import typing
 from pathlib import Path
@@ -127,10 +128,19 @@ class BuildExtension(torch.utils.cpp_extension.BuildExtension):
             ext.define_macros += macros
             ext.include_dirs.append(str(gen_path))
 
+        Path("src/povs/build_params.json").write_text(json.dumps({
+            "debug_mode":     build_options.POVS_CUDA_DEBUG_MODE,
+            "cuda_arch":      build_options.POVS_CUDA_CUDA_ARCH,
+            "pblock_sizes":   build_options.POVS_CUDA_PBLOCK_SIZES,
+            "vblock_sizes":   build_options.POVS_CUDA_VBLOCK_SIZES,
+            "instance_sizes": build_options.POVS_CUDA_INSTANCE_SIZES,
+        }))
+
         super().run()
 
 
 setup(
+    package_data={"povs": ["build_params.json"]},
     cmdclass={
         "build_ext": BuildExtension,
     },

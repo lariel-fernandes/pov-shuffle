@@ -1,5 +1,7 @@
 # SPDX-FileCopyrightText: Copyright 2025 Dash0 Inc.
+import json
 import math
+from importlib.resources import files
 
 import numpy as np
 import torch
@@ -13,8 +15,14 @@ from .constants import (
     MIN_SEED,
     MIN_VBLOCK_SIZE,
 )
-from .types import FullOptions
+from .types import BuildParams, FullOptions
 from .utils import is_power_of_2, least_factor_to_make_multiple
+
+
+def get_build_params() -> BuildParams:
+    """Return the build-time parameters used to compile the CUDA extension."""
+    data = json.loads(files("povs").joinpath("build_params.json").read_text())
+    return BuildParams(**data)
 
 
 def get_int_seed(seed: int | torch.Generator | np.random.Generator | None) -> int:

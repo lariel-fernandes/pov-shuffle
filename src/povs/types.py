@@ -1,6 +1,16 @@
 from typing import NamedTuple
 
 
+class BuildParams(NamedTuple):
+    """Build-time parameters used to compile the CUDA extension."""
+
+    debug_mode: bool
+    cuda_arch: list[str]
+    pblock_sizes: list[int]
+    vblock_sizes: list[int]
+    instance_sizes: list[int]
+
+
 class Options(NamedTuple):
     """POV Shuffle algorithm options.
 
