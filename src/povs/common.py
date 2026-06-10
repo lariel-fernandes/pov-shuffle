@@ -150,8 +150,10 @@ def choose_offsets(
     rests = set()
     for i in range(max_offsets):
         offset = i * base_offset
-        rest = 0 if offset == 0 else offset % pblock_size
+        if offset >= deck_size:
+            break
 
+        rest = 0 if offset == 0 else offset % pblock_size
         if rest not in rests:
             offsets.append(offset)
             rests.add(rest)
