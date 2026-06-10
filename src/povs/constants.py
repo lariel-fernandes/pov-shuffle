@@ -26,6 +26,7 @@ MAX_MEM_ALIGNMENT_BITS = 128
 
 MIN_CUDA_ARCH = (7, 5)
 MAX_BLOCK_SIZE = 1024
+MIN_BLOCk_SIZE = 32  # 1 warp
 
 # Lookup of Cuda Compute capability (major, minor) tuple to a tuple of:
 # - Thread-Block size for ideal occupancy (disregarding memory constraints, which are handled separately)

@@ -11,6 +11,7 @@ from .constants import (
     MIN_CUDA_ARCH,
     MIN_PBLOCK_SIZE,
     MIN_VBLOCK_SIZE,
+    MIN_BLOCk_SIZE,
 )
 from .types import FullOptions, Options
 from .utils import is_power_of_2, round_down_to_power_of_2
@@ -109,6 +110,7 @@ def _validate_thr_block_size(
     prefix = f"thread-block size ({thr_block_size})"
     assert is_power_of_2(thr_block_size), f"{prefix} must be a power of 2"
     assert thr_block_size <= MAX_BLOCK_SIZE, f"{prefix} must not exceed {MAX_BLOCK_SIZE}"
+    assert thr_block_size >= MIN_BLOCk_SIZE, f"{prefix} must be at least {MIN_BLOCk_SIZE}"
     assert thr_block_size <= (total := vblock_size * pblock_size), f"{prefix} must not exceed total instances ({total})"
 
 
@@ -199,7 +201,7 @@ def _choose_thr_block_size(
         pblock_size * vblock_size,  # Don't use more threads than there are instances.
     )
 
-    return round_down_to_power_of_2(thr_block_size)
+    return max(MIN_BLOCk_SIZE, round_down_to_power_of_2(thr_block_size))
 
 
 def _get_occupancy_for_smem_constraint(

@@ -15,6 +15,7 @@ static constexpr int MIN_SEED = 1;
 static constexpr int MAX_SEED = 1000;
 
 static constexpr int MIN_CUDA_ARCH = 750;
+static constexpr int MIN_BLOCK_SIZE = 32;
 static constexpr int MAX_BLOCK_SIZE = 1024;
 
 static constexpr int MIN_VBLOCK_SIZE = 2;
@@ -136,6 +137,7 @@ __global__ void povs_kernel(
     // GPU thread-block preflight — keep in sync with povs.torch.preflight, thread-block section
     {
         CUTE_STATIC_ASSERT(BlockSize <= MAX_BLOCK_SIZE, "Thread-BlockSize must not exceed MAX_BLOCK_SIZE");
+        CUTE_STATIC_ASSERT(BlockSize >= MIN_BLOCK_SIZE, "Thread-BlockSize must be at least MIN_BLOCK_SIZE");
         CUTE_STATIC_ASSERT(BlockSize > 0 && (BlockSize & (BlockSize - 1)) == 0, "Thread-BlockSize must be a power of 2");
         CUTE_STATIC_ASSERT(BlockSize <= PBlockSize * VBlockSize, "Thread-BlockSize must not exceed instances per block");
     }
