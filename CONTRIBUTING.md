@@ -1,5 +1,8 @@
 
 ## Tasks
+ux:
+- [ ] add flag to restrict optim to supported params only
+
 testing:
 - [ ] review, run and possibly fix unit tests:
   - [ ] pblk size choice
@@ -64,7 +67,7 @@ find src -name "*.cpp" -o -name "*.h" -o -name "*.cu" | xargs clang-format -i
 
 ## Test
 ```bash
-.venv/bin/python -m pytest ./src/tests/
+.venv/bin/python -m pytest ./src/tests/ -v
 ```
 
 ## Running Evaluations

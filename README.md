@@ -38,8 +38,9 @@ Example:
 ```bash
 # pyproject.toml
 [tool.uv]
-extra-build-variables = { pov-shuffle = { POVS_CUDA_PBLOCK_SIZES = "42,19,512" } } 
+extra-build-variables = { pov-shuffle = { POVS_CUDA_INSTANCE_SIZES = "32,96,128" } } 
 ```
+- Build parameters can be queried at runtime via `povs.get_build_params()`
 
 ## Performance
 

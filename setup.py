@@ -15,9 +15,9 @@ class EnvVars(NamedTuple):
 
     POVS_CUDA_DEBUG_MODE:     bool      = "false"  # Build with debug flags
     POVS_CUDA_CUDA_ARCH:      list[str] = "native" # Comma-separated list of CUDA architectures (e.g.: 75,86 or native)
-    POVS_CUDA_PBLOCK_SIZES:   list[int] = "32"     # Comma-separated list of physical block sizes, in number of instances
+    POVS_CUDA_PBLOCK_SIZES:   list[int] = "16"     # Comma-separated list of physical block sizes, in number of instances
     POVS_CUDA_VBLOCK_SIZES:   list[int] = "2"      # Comma-separated list of virtual block sizes, in number of physical blocks
-    POVS_CUDA_INSTANCE_SIZES: list[int] = "1"      # Comma-separated list of shuffled instance sizes (1 for shuffling scalars, D to shuffle D-sized arrays, N * M for N x M matrices, etc.)
+    POVS_CUDA_INSTANCE_SIZES: list[int] = "1"    # Comma-separated list of shuffled instance sizes (1 for shuffling scalars, D to shuffle D-sized arrays, N * M for N x M matrices, etc.)
 
 
 def load_env_vars() -> EnvVars:
