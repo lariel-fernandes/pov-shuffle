@@ -4,18 +4,14 @@ ux:
 - [ ] add flag to restrict optim to supported params only
 
 testing:
-- [ ] review, run and possibly fix unit tests:
-  - [ ] pblk size choice
-  - [ ] thr blk size choice
-  - [ ] povs with partial or full inference of algorithm options
 - [ ] consider using xorshift32 in numpy workers to have reproducibility of the CUDA implementation (might also need to switch the host-side rng engine)
 
 evaluation:
-- [ ] review new evaluation scripts
-- [ ] allow using partial options in evals, with documenting the inferred
-- [ ] document gpu model and architecture in relevant eval reports
-- [ ] do some plot that compares the resulting TVD and other biases against a standard local block shuffle!
-- [ ] add the exercise of breaking point by dataset size
+- [ ] tvd per iter: re-test and update if necessary, allow full or partial options inference
+- [ ] review the new evaluation scripts, adjust if necessary, allow full or partial options inference, add gpu info to reports
+- [ ] experiment: compare the resulting TVD and other biases against a standard local block shuffle
+- [ ] experiment: tvd breaking point by dataset size
+- [ ] experiment: sequential bias by iter with lstm evaluator
 
 ## Project Structure
 
