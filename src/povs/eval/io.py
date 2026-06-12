@@ -1,23 +1,10 @@
 from pathlib import Path
 
-from .reports import TimePerDeckSizeReport, TimePerOptionsReport, TVDPerIterReport
+from .reports import TimePerDeckSizeReport, TVDPerIterReport
 from .utils import yaml
 
 
 def save_time_per_deck_size_report(path: Path, report: TimePerDeckSizeReport) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-    details = report._asdict()
-    plot = details.pop("plot")
-    timings = details.pop("timings")
-
-    (path / "details.yml").write_text(yaml.dump(details))
-    (path / "README.md").write_text(report.__doc__)
-    timings.to_csv(path / "timings.csv", index=False)
-    plot.savefig(path / "plot.png")
-
-
-def save_time_per_options_report(path: Path, report: TimePerOptionsReport) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
     details = report._asdict()

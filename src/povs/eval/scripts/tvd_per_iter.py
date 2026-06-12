@@ -21,9 +21,8 @@ params = TVDPerIterParams(
     max_iterations=6,
     ngram_degrees=[2, 3],
     povs_options=Options(
+        virtual_block_size=2,
         physical_block_size=32,
-        virtual_block_size=3,
-        offsets=[0, 4, 8, 12, 16, 20, 24, 32],
     ),
 )
 
