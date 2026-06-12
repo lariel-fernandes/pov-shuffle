@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from povs import FullOptions
+from povs import Options
 from povs.common import get_block_counts
 
 from ..exercises import tvd_per_iteration
@@ -20,21 +20,15 @@ params = TVDPerIterParams(
     deck_size=1024,
     max_iterations=6,
     ngram_degrees=[2, 3],
-    povs_options=FullOptions(
+    povs_options=Options(
         physical_block_size=32,
         virtual_block_size=3,
         offsets=[0, 4, 8, 12, 16, 20, 24, 32],
     ),
 )
 
-# Infer details
-start_time = datetime.now()
-_, num_vblocks = get_block_counts(deck_size=params.deck_size, **params.povs_options._asdict())
-worker_data_scan_per_iter = (
-    params.povs_options.physical_block_size * params.povs_options.virtual_block_size
-) / params.num_samples
-
 # Run experiment
+start_time = datetime.now()
 result = tvd_per_iteration(
     deck_size=params.deck_size,
     num_samples=params.num_samples,
@@ -47,7 +41,10 @@ result = tvd_per_iteration(
 # Put together the report
 report = TVDPerIterReport(
     params=params,
-    worker_data_scan_per_iter=worker_data_scan_per_iter,
+    worker_data_scan_per_iter=(
+        worker_data_scan_per_iter := (result.options.physical_block_size * result.options.virtual_block_size)
+        / params.num_samples
+    ),
     baseline_tvd=result.baseline_tvd,
     baseline_ngram_tvds=result.baseline_ngram_tvds.tolist(),
     tvds=pd.DataFrame({
@@ -67,9 +64,9 @@ report = TVDPerIterReport(
         ngram_degrees=params.ngram_degrees,
         baseline_ngram_tvds=result.baseline_ngram_tvds,
     ),
-    num_valid_offsets=len(params.povs_options.offsets),
-    ideal_worker_count=num_vblocks,
-    host_shuffle_load=(num_vblocks * params.povs_options.virtual_block_size) / params.deck_size,
+    num_valid_offsets=len(result.options.offsets),
+    ideal_worker_count=(num_vblocks := get_block_counts(deck_size=params.deck_size, **result.options._asdict())[1]),
+    host_shuffle_load=(num_vblocks * result.options.virtual_block_size) / params.deck_size,
 )
 
 # Save the report

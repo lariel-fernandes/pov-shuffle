@@ -1,13 +1,6 @@
 from typing import NamedTuple
 
-from povs import FullOptions
-
-
-class OptionsSetEntry(NamedTuple):
-    """A labeled POV Shuffle options configuration for use in timing experiments."""
-
-    label: str
-    options: FullOptions
+from povs import Options
 
 
 class TimePerDeckSizeParams(NamedTuple):
@@ -28,28 +21,7 @@ class TimePerDeckSizeParams(NamedTuple):
     instance_size: int
     num_runs: int
     num_warmup_runs: int
-    povs_options_per_deck_size: dict[int, FullOptions]
-
-
-class TimePerOptionsParams(NamedTuple):
-    """Time per options set experiment parameters.
-
-    - `seed`: RNG seed for reproducibility.
-    - `deck_size`: Fixed number of elements in the deck for all runs.
-    - `instance_size`: Feature dimension of each deck element; tensor shape is `(deck_size, instance_size)`.
-    - `iterations`: Number of POV Shuffle iterations per timed call.
-    - `num_runs`: Number of timed runs per options set (for averaging).
-    - `num_warmup_runs`: Number of warm-up calls before timing begins (not measured).
-    - `options_sets`: List of labeled POV Shuffle options configurations to benchmark.
-    """
-
-    seed: int
-    deck_size: int
-    instance_size: int
-    iterations: int
-    num_runs: int
-    num_warmup_runs: int
-    options_sets: list[OptionsSetEntry]
+    povs_options_per_deck_size: dict[int, Options | None]
 
 
 class TVDPerIterParams(NamedTuple):
@@ -68,4 +40,4 @@ class TVDPerIterParams(NamedTuple):
     deck_size: int
     max_iterations: int
     ngram_degrees: list[int]
-    povs_options: FullOptions
+    povs_options: Options | None

@@ -3,7 +3,7 @@ from typing import NamedTuple
 import matplotlib.figure
 import pandas as pd
 
-from .params import TimePerDeckSizeParams, TimePerOptionsParams, TVDPerIterParams
+from .params import TimePerDeckSizeParams, TVDPerIterParams
 
 
 class TimePerDeckSizeReport(NamedTuple):
@@ -24,27 +24,6 @@ class TimePerDeckSizeReport(NamedTuple):
     """
 
     params: TimePerDeckSizeParams
-    timings: pd.DataFrame
-    plot: matplotlib.figure.Figure
-
-
-class TimePerOptionsReport(NamedTuple):
-    """POV Shuffle time per options set experiment report.
-
-    **Results & Metrics**:
-
-    - `plot`: Matplotlib figure (horizontal bar chart) comparing mean shuffle time per options configuration,
-              sorted by ascending mean time, with standard deviation error bars.
-
-    - `timings`: DataFrame with one row per options set. Columns:
-      - `label`: Human-readable label for the options configuration.
-      - `mean_ms`: Mean shuffle time in milliseconds across timing runs.
-      - `std_ms`: Standard deviation of shuffle time.
-      - `min_ms`: Minimum observed shuffle time.
-      - `max_ms`: Maximum observed shuffle time.
-    """
-
-    params: TimePerOptionsParams
     timings: pd.DataFrame
     plot: matplotlib.figure.Figure
 

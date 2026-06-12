@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from povs import FullOptions
+from povs import Options
 
 from ..exercises import shuffle_time_per_deck_size
 from ..io import save_time_per_deck_size_report
@@ -21,13 +21,13 @@ params = TimePerDeckSizeParams(
     num_runs=50,
     num_warmup_runs=10,
     povs_options_per_deck_size={
-        256: FullOptions(physical_block_size=16, virtual_block_size=3, offset_step_size=4, max_offset_steps=8),
-        512: FullOptions(physical_block_size=32, virtual_block_size=3, offset_step_size=4, max_offset_steps=8),
-        1024: FullOptions(physical_block_size=32, virtual_block_size=3, offset_step_size=4, max_offset_steps=16),
-        2048: FullOptions(physical_block_size=32, virtual_block_size=4, offset_step_size=4, max_offset_steps=16),
-        4096: FullOptions(physical_block_size=64, virtual_block_size=4, offset_step_size=8, max_offset_steps=16),
-        8192: FullOptions(physical_block_size=64, virtual_block_size=4, offset_step_size=8, max_offset_steps=16),
-        16384: FullOptions(physical_block_size=128, virtual_block_size=4, offset_step_size=16, max_offset_steps=16),
+        256: Options(physical_block_size=16, virtual_block_size=3),
+        512: Options(physical_block_size=32, virtual_block_size=3),
+        1024: Options(physical_block_size=32, virtual_block_size=3),
+        2048: Options(physical_block_size=32, virtual_block_size=4),
+        4096: Options(physical_block_size=64, virtual_block_size=4),
+        8192: Options(physical_block_size=64, virtual_block_size=4),
+        16384: Options(physical_block_size=128, virtual_block_size=4),
     },
 )
 
@@ -44,15 +44,23 @@ result = shuffle_time_per_deck_size(
 )
 
 # Compute stats
-pov_means = [np.mean(t) for t in result.pov_times_ms]
-pov_stds = [np.std(t) for t in result.pov_times_ms]
-baseline_means = [np.mean(t) for t in result.baseline_times_ms]
-baseline_stds = [np.std(t) for t in result.baseline_times_ms]
+pov_means = [float(np.mean(t)) for t in result.pov_times_ms]
+pov_stds = [float(np.std(t)) for t in result.pov_times_ms]
+baseline_means = [float(np.mean(t)) for t in result.baseline_times_ms]
+baseline_stds = [float(np.std(t)) for t in result.baseline_times_ms]
 speedups = [b / p for b, p in zip(baseline_means, pov_means)]
 
 # Put together the report
 report = TimePerDeckSizeReport(
-    params=params,
+    params=params._replace(
+        povs_options_per_deck_size={
+            size: options
+            for size, options in zip(
+                params.povs_options_per_deck_size.keys(),
+                result.option_sets,
+            )
+        }
+    ),
     timings=pd.DataFrame({
         "deck_size": params.deck_sizes,
         "pov_mean_ms": pov_means,

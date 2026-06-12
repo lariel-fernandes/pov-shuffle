@@ -7,8 +7,6 @@ testing:
 - [ ] consider using xorshift32 in numpy workers to have reproducibility of the CUDA implementation (might also need to switch the host-side rng engine)
 
 evaluation:
-- [ ] tvd per iter: re-test and update if necessary, allow full or partial options inference
-- [ ] review the new evaluation scripts, adjust if necessary, allow full or partial options inference, add gpu info to reports
 - [ ] experiment: compare the resulting TVD and other biases against a standard local block shuffle
 - [ ] experiment: tvd breaking point by dataset size
 - [ ] experiment: sequential bias by iter with lstm evaluator
@@ -71,6 +69,7 @@ TVD per iteration:
 ```bash
 .venv/bin/python -m povs.eval.scripts.tvd_per_iter
 ```
+- Find other evaluation scripts in [`src/povs/eval/scripts`](./src/povs/eval/scripts)
 
 ## Generate stubs
 ```bash

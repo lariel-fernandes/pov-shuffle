@@ -50,36 +50,6 @@ def plot_time_per_deck_size(
     return fig
 
 
-def plot_time_per_options(
-    labels: list[str],
-    means_ms: list[float],
-    stds_ms: list[float],
-) -> matplotlib.figure.Figure:
-    """Plot mean shuffle time per algorithm options set as a horizontal bar chart.
-
-    :param labels: Human-readable label for each options set.
-    :param means_ms: Mean shuffle time per options set, in milliseconds.
-    :param stds_ms: Standard deviation of shuffle time per options set.
-    :returns: Matplotlib figure.
-    """
-    order = sorted(range(len(means_ms)), key=lambda i: means_ms[i])
-    sorted_labels = [labels[i] for i in order]
-    sorted_means = [means_ms[i] for i in order]
-    sorted_stds = [stds_ms[i] for i in order]
-
-    fig, ax = plt.subplots()
-    y_pos = list(range(len(sorted_labels)))
-    ax.barh(y_pos, sorted_means, xerr=sorted_stds, align="center", color="C0", error_kw={"elinewidth": 1})
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(sorted_labels)
-    ax.set_xlabel("Time (ms)")
-    ax.set_title("POV Shuffle — Time per Options Set")
-    ax.grid(True, axis="x")
-
-    fig.tight_layout()
-    return fig
-
-
 def plot_tvd_per_iteration(
     tvds: np.ndarray,
     baseline: float,

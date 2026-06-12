@@ -4,23 +4,17 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from povs import FullOptions
-from povs import shuffle as _pov_shuffle
-from povs.numpy import shuffle
+from povs import optim_options_for_dataset, shuffle
+from povs.types import FullOptions, Options
 
 from .metrics import get_ngram_tvd, get_tvd
-from .params import OptionsSetEntry
 from .utils import time_cuda_op
 
 
 class ShuffleTimePerDeckSizeResult(NamedTuple):
     pov_times_ms: list[list[float]]  # outer: per deck_size, inner: per run
     baseline_times_ms: list[list[float]]  # outer: per deck_size, inner: per run
-
-
-class ShuffleTimePerOptionsResult(NamedTuple):
-    labels: list[str]
-    times_ms: list[list[float]]  # outer: per options set, inner: per run
+    option_sets: list[FullOptions]
 
 
 def shuffle_time_per_deck_size(
@@ -29,7 +23,7 @@ def shuffle_time_per_deck_size(
     instance_size: int,
     num_runs: int,
     num_warmup_runs: int,
-    povs_options_per_deck_size: dict[int, FullOptions],
+    povs_options_per_deck_size: dict[int, Options | None],
     seed: int,
 ) -> ShuffleTimePerDeckSizeResult:
     """Measure POV Shuffle time and Fisher-Yates CUDA baseline time across deck sizes.
@@ -44,16 +38,18 @@ def shuffle_time_per_deck_size(
     """
     pov_times = []
     baseline_times = []
+    option_sets = []
 
     for i, deck_size in enumerate(tqdm(deck_sizes, desc="Deck sizes")):
-        options = povs_options_per_deck_size[deck_size]
         data = torch.zeros(deck_size, instance_size, dtype=torch.float32, device="cuda")
+        options = optim_options_for_dataset(data, povs_options_per_deck_size[deck_size])
+        option_sets.append(options)
 
         gen = torch.Generator(device="cuda")
         gen.manual_seed(seed + i)
         pov_times.append(
             time_cuda_op(
-                lambda: _pov_shuffle(data, iterations=iterations, options=options, seed=gen),
+                lambda: shuffle(data, iterations=iterations, options=options, seed=gen),
                 num_warmup=num_warmup_runs,
                 num_runs=num_runs,
             )
@@ -69,49 +65,15 @@ def shuffle_time_per_deck_size(
             )
         )
 
-    return ShuffleTimePerDeckSizeResult(pov_times_ms=pov_times, baseline_times_ms=baseline_times)
-
-
-def shuffle_time_per_options(
-    options_sets: list[OptionsSetEntry],
-    deck_size: int,
-    instance_size: int,
-    iterations: int,
-    num_runs: int,
-    num_warmup_runs: int,
-    seed: int,
-) -> ShuffleTimePerOptionsResult:
-    """Measure POV Shuffle time for each options configuration on a fixed deck size.
-
-    :param options_sets: Labeled options configurations to benchmark.
-    :param deck_size: Fixed number of elements in the deck.
-    :param instance_size: Feature dimension; each CUDA tensor has shape (deck_size, instance_size).
-    :param iterations: Number of POV Shuffle iterations per timed call.
-    :param num_runs: Number of timed runs per options set.
-    :param num_warmup_runs: Number of warm-up calls before measurement.
-    :param seed: Base seed; each options set gets an independent derived seed.
-    """
-    labels = []
-    times = []
-
-    for i, entry in enumerate(tqdm(options_sets, desc="Options sets")):
-        data = torch.zeros(deck_size, instance_size, dtype=torch.float32, device="cuda")
-        gen = torch.Generator(device="cuda")
-        gen.manual_seed(seed + i)
-
-        labels.append(entry.label)
-        times.append(
-            time_cuda_op(
-                lambda: _pov_shuffle(data, iterations=iterations, options=entry.options, seed=gen),
-                num_warmup=num_warmup_runs,
-                num_runs=num_runs,
-            )
-        )
-
-    return ShuffleTimePerOptionsResult(labels=labels, times_ms=times)
+    return ShuffleTimePerDeckSizeResult(
+        pov_times_ms=pov_times,
+        baseline_times_ms=baseline_times,
+        option_sets=option_sets,
+    )
 
 
 class TVDPerIterResult(NamedTuple):
+    options: FullOptions  # options after inference for dataset
     tvds: np.ndarray  # shape (max_iterations,)
     baseline_tvd: float
     ngram_tvds: np.ndarray  # shape (max_iterations, len(ngram_degrees))
@@ -122,7 +84,7 @@ def tvd_per_iteration(
     deck_size: int,
     num_samples: int,
     max_iterations: int,
-    options: FullOptions,
+    options: Options | None,
     rng: np.random.Generator,
     ngram_degrees: list[int],
 ) -> TVDPerIterResult:
@@ -136,6 +98,8 @@ def tvd_per_iteration(
     :param ngram_degrees: N-gram degrees for which to compute TVD at each iteration.
     """
     deck = np.arange(deck_size)
+    options = optim_options_for_dataset(deck, options)
+
     tvds = np.zeros(max_iterations, dtype=float)
     ngram_tvds = np.zeros((max_iterations, len(ngram_degrees)), dtype=float)
 
@@ -159,4 +123,5 @@ def tvd_per_iteration(
         baseline_tvd=baseline_tvd,
         ngram_tvds=ngram_tvds,
         baseline_ngram_tvds=baseline_ngram_tvds,
+        options=options,
     )
