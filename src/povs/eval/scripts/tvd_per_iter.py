@@ -39,7 +39,7 @@ result = tvd_per_iteration(
 
 # Put together the report
 report = TVDPerIterReport(
-    params=params,
+    params=params._replace(povs_options=result.options),
     worker_data_scan_per_iter=(
         worker_data_scan_per_iter := (result.options.physical_block_size * result.options.virtual_block_size)
         / params.num_samples
