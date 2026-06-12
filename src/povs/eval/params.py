@@ -22,6 +22,7 @@ class TimePerDeckSizeParams(NamedTuple):
     num_runs: int
     num_warmup_runs: int
     povs_options_per_deck_size: dict[int, Options | None]
+    dtype: str
 
 
 class TVDPerIterParams(NamedTuple):

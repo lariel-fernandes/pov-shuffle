@@ -24,6 +24,7 @@ def shuffle_time_per_deck_size(
     num_runs: int,
     num_warmup_runs: int,
     povs_options_per_deck_size: dict[int, Options | None],
+    dtype: torch.dtype,
     seed: int,
 ) -> ShuffleTimePerDeckSizeResult:
     """Measure POV Shuffle time and Fisher-Yates CUDA baseline time across deck sizes.
@@ -34,6 +35,7 @@ def shuffle_time_per_deck_size(
     :param num_runs: Number of timed runs per deck size.
     :param num_warmup_runs: Number of warm-up calls before measurement.
     :param povs_options_per_deck_size: POV Shuffle options to use for each deck size.
+    :param dtype: Numeric data type.
     :param seed: Base seed; each deck size gets an independent derived seed.
     """
     pov_times = []
@@ -41,7 +43,7 @@ def shuffle_time_per_deck_size(
     option_sets = []
 
     for i, deck_size in enumerate(tqdm(deck_sizes, desc="Deck sizes")):
-        data = torch.zeros(deck_size, instance_size, dtype=torch.float32, device="cuda")
+        data = torch.zeros(deck_size, instance_size, dtype=dtype, device="cuda")
         options = optim_options_for_dataset(data, povs_options_per_deck_size[deck_size])
         option_sets.append(options)
 

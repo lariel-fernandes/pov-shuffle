@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 
 from povs import Options
 
@@ -29,6 +30,7 @@ params = TimePerDeckSizeParams(
         8192: Options(physical_block_size=64, virtual_block_size=4),
         16384: Options(physical_block_size=128, virtual_block_size=4),
     },
+    dtype=torch.float32.__str__(),
 )
 
 # Run experiment
@@ -40,6 +42,7 @@ result = shuffle_time_per_deck_size(
     num_runs=params.num_runs,
     num_warmup_runs=params.num_warmup_runs,
     povs_options_per_deck_size=params.povs_options_per_deck_size,
+    dtype=getattr(torch, params.dtype),
     seed=params.seed,
 )
 
