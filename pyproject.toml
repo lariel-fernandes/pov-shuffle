@@ -43,7 +43,10 @@ povs = ["build_params.json"]
 [tool.uv]
 reinstall-package = ["pov-shuffle"]
 python-preference = "only-managed"
-extra-build-variables = { pov-shuffle = { POVS_CUDA_INSTANCE_SIZES = "1,8,128", POVS_CUDA_PBLOCK_SIZES = "16" } }
+
+[tool.uv.extra-build-variables.pov-shuffle]
+POVS_CUDA_CARTESIAN_INSTANCING = "false"
+POVS_CUDA_INSTANTIATIONS = "2,16,8,float;2,32,8,float"
 
 # === Ruff ========================================================================================
 
