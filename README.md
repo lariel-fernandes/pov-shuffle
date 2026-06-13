@@ -52,6 +52,13 @@ Total Variation Distance of a uniform shuffle distribution against the shuffle d
 
 [![alt text](./data/tvd_per_iter/2026-06-13T15:33:30/plot.png)](./data/tvd_per_iter/2026-06-13T15:33:30)
 
+Shuffle time per deck size with 4-iterations POVS on instances of shape `(128 x float16)`, using the NVIDIA Ada Lovelace architecture.
+
+For a fair comparison with the algorithm, which offers close-to-uniform, zero-copy, in-place shuffling,
+the used baseline is also a uniform shuffle (Fisher-Yates), performed in-place and without copy on GPU memory.
+
+[![alt text](./data/time_per_deck_size/2026-06-13T18:06:50/plot.png)](./data/time_per_deck_size/2026-06-13T18:06:50)
+
 ## Algorithm
 
 ### How it works

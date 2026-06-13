@@ -1,0 +1,126 @@
+params:
+  seed: 42
+  deck_sizes:
+  - 10000
+  - 50000
+  - 100000
+  - 500000
+  - 1000000
+  iterations: 4
+  instance_size: 128
+  num_runs: 50
+  num_warmup_runs: 10
+  povs_options_per_deck_size:
+    10000:
+      virtual_block_size: 2
+      physical_block_size: 16
+      offsets:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      gpu_thread_block_size: 32
+    50000:
+      virtual_block_size: 2
+      physical_block_size: 16
+      offsets:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      gpu_thread_block_size: 32
+    100000:
+      virtual_block_size: 2
+      physical_block_size: 16
+      offsets:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      gpu_thread_block_size: 32
+    500000:
+      virtual_block_size: 2
+      physical_block_size: 16
+      offsets:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      gpu_thread_block_size: 32
+    1000000:
+      virtual_block_size: 2
+      physical_block_size: 16
+      offsets:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      gpu_thread_block_size: 32
+  default_options: null
+  dtype: float16
+  tolerate_errors: false
+  cuda_device_id: 0
+pov_errors: {}
+baseline_errors: {}
+cuda_device_name: NVIDIA GeForce RTX 4080 Laptop GPU
+cuda_compute_capability: 8.9
