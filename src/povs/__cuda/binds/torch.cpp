@@ -4,51 +4,17 @@
 
 #include "../lib/povs.h"
 
-/** Macros */
-#pragma region Macros
-
+#if __has_include("povs_cuda_dispatch.gen.h")
+#include "povs_cuda_dispatch.gen.h"
+#else
 // clang-format off
-#ifndef PBLOCK_SIZE_CASES
-#define PBLOCK_SIZE_CASES(lambda) \
-    case 8: { constexpr int PBLOCK_SIZE = 8; return lambda(); }
-#endif
-
-#ifndef VBLOCK_SIZE_CASES
-#define VBLOCK_SIZE_CASES(lambda) \
-    case 2: { constexpr int VBLOCK_SIZE = 2; return lambda(); }
-#endif
-
-#ifndef INSTANCE_SIZE_CASES
-#define INSTANCE_SIZE_CASES(lambda) \
-    case 2: { constexpr int INSTANCE_SIZE = 1; return lambda(); }
-#endif
+#define POVS_CUDA_DISPATCH(vblock_val, pblock_val, instance_val, scalar_type_val, fn) \
+    do { \
+        if (vblock_val == 2 && pblock_val == 8 && instance_val == 1 && scalar_type_val == at::kFloat) { constexpr int VBLOCK_SIZE = 2, PBLOCK_SIZE = 8, INSTANCE_SIZE = 1; using scalar_t = float; fn; } \
+        else { TORCH_CHECK(false, "Unsupported povs_cuda combination:", " vblock=", vblock_val, " pblock=", pblock_val, " instance=", instance_val); } \
+    } while (0)
 // clang-format on
-
-#define PBLOCK_SIZE_DISPATCH(x, lambda)                                  \
-    [&]() {                                                              \
-        switch (x) {                                                     \
-            PBLOCK_SIZE_CASES(lambda)                                    \
-            default: TORCH_CHECK(false, "Unsupported PBLOCK_SIZE: ", x); \
-        }                                                                \
-    }()
-
-#define VBLOCK_SIZE_DISPATCH(x, lambda)                                  \
-    [&]() {                                                              \
-        switch (x) {                                                     \
-            VBLOCK_SIZE_CASES(lambda)                                    \
-            default: TORCH_CHECK(false, "Unsupported VBLOCK_SIZE: ", x); \
-        }                                                                \
-    }()
-
-#define INSTANCE_SIZE_DISPATCH(x, lambda)                                  \
-    [&]() {                                                                \
-        switch (x) {                                                       \
-            INSTANCE_SIZE_CASES(lambda)                                    \
-            default: TORCH_CHECK(false, "Unsupported INSTANCE_SIZE: ", x); \
-        }                                                                  \
-    }()
-
-#pragma endregion
+#endif
 
 void torch_povs(
     const torch::Tensor& X, // Data to shuffle in place along the axis 0
@@ -81,21 +47,14 @@ void torch_povs(
     for (int i = 1; i < X.dim(); ++i)
         instance_size *= X.size(i);
 
-    AT_DISPATCH_FLOATING_TYPES_AND3(at::kHalf, at::kInt, at::kLong, X.scalar_type(), "povs", [&] {
-        auto* Xg_ptr = X.data_ptr<scalar_t>(); // X pointer in device global memory
-
-        PBLOCK_SIZE_DISPATCH(pblock_size, [&]() {
-            VBLOCK_SIZE_DISPATCH(vblock_size, [&]() {
-                INSTANCE_SIZE_DISPATCH(instance_size, [&]() {
-                    // clang-format off
-                    (povs_cuda<scalar_t, PBLOCK_SIZE, VBLOCK_SIZE, INSTANCE_SIZE>)(
-                        Xg_ptr, num_instances,
-                        Oh_ptr, num_offsets,
-                        iterations, seed, X.get_device(), block_size
-                    );
-                    // clang-format on
-                });
-            });
-        });
+    // clang-format off
+    POVS_CUDA_DISPATCH(vblock_size, pblock_size, instance_size, X.scalar_type(), {
+        auto* Xg_ptr = X.data_ptr<scalar_t>();
+        (povs_cuda<VBLOCK_SIZE, PBLOCK_SIZE, INSTANCE_SIZE, scalar_t>)(
+            Xg_ptr, num_instances,
+            Oh_ptr, num_offsets,
+            iterations, seed, X.get_device(), block_size
+        );
     });
+    // clang-format on
 }

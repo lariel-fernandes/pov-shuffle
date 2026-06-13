@@ -30,15 +30,17 @@ uv add pov-shuffle
 ```
 
 ### Build Customization
-Because of optimizations within the CUDA extension, the domain of certain parameters must be specified via environment variables at build time
-(see [setup.py](setup.py) for the list of variables and their defaults).
+Because of optimizations within the CUDA extension, the possible combinations of certain parameters need to be known at build-time.
+
+See [setup.py](setup.py) for the list of environment variables that can be set at build-time in order to add support for different parameter sets.
 
 In order to set environment variables consistently across builds we recommend using UV's [`extra-build-variables`](https://docs.astral.sh/uv/reference/settings/#extra-build-variables).
 Example:
-```bash
+```toml
 # pyproject.toml
-[tool.uv]
-extra-build-variables = { pov-shuffle = { POVS_CUDA_INSTANCE_SIZES = "32,96,128" } } 
+[tool.uv.extra-build-variables.pov-shuffle]
+POVS_CUDA_INSTANTIATIONS = "4,32,64,float;2,64,16,int"  # Add support for 4x32x64xFloat and 2x64x16xInt (VBlockSize x PBlockSize x InstanceSize x DType)
+POVS_CUDA_INSTANCE_SIZES = "32,96,128"  # Add support for these instance sizes, in cartesian combination with supported dtypes and supported values of other parameters.
 ```
 - Build parameters can be queried at runtime via `povs.get_build_params()`
 

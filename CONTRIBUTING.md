@@ -2,7 +2,7 @@
 ## Tasks
 ux:
 - [ ] add flag to restrict optim to supported params only
-- [ ] add the possibility of explicit template instancing at build time, also for specific dtypes
+- [ ] expose a checker for supported params using build params, taking into account custom template instancing and cartesian flag
 
 testing:
 - [ ] consider using xorshift32 in numpy workers to have reproducibility of the CUDA implementation (might also need to switch the host-side rng engine)

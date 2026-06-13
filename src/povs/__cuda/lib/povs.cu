@@ -353,7 +353,7 @@ __global__ void povs_kernel(
 /** CUDA host program */
 #pragma region CUDA host program
 
-template <typename DType, int PBlockSize, int VBlockSize, int InstanceSize>
+template <int VBlockSize, int PBlockSize, int InstanceSize, typename DType>
 void povs_cuda(
     DType* Xg_ptr, // Instances to shuffle in place - Global device memory pointer.
                    // Col-major (InstanceSize, num_instances) -- equivalent to Row-major (num_instances, InstanceSize)
@@ -515,7 +515,7 @@ int main()
         return 1;
     }
     cudaMemcpy(Xg_ptr, Xh_ptr, sizeof(DType) * size(Xh), cudaMemcpyHostToDevice);
-    povs_cuda<DType, PBlockSize, VBlockSize, InstanceSize>(
+    povs_cuda<VBlockSize, PBlockSize, InstanceSize, DType>(
         Xg_ptr, num_instances, Oh_ptr, num_offsets, iterations, seed, device_id, PBlockSize * VBlockSize
     );
     cudaMemcpy(Xh_ptr, Xg_ptr, sizeof(DType) * size(Xh), cudaMemcpyDeviceToHost);
@@ -563,7 +563,7 @@ int main()
 #if __has_include("povs_cuda_template_instances.gen.inc")
 #include "povs_cuda_template_instances.gen.inc"
 #else
-INSTANTIATE_POVS_CUDA_ALL_TYPES(16, 2, 1)
+INSTANTIATE_POVS_CUDA_ALL_TYPES(2, 16, 1)
 #endif
 
 #pragma endregion
