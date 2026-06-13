@@ -39,10 +39,10 @@ def plot_time_per_deck_size(
     fig, ax = plt.subplots()
 
     if len(pov_sizes) > 0:
-        ax.plot(pov_sizes, pov_means, marker="o", color="C0", label="POV Shuffle")
+        ax.plot(pov_sizes, pov_means, marker="o", color="C0", label="POV")
         ax.fill_between(pov_sizes, pov_means - pov_stds, pov_means + pov_stds, color="C0", alpha=0.2)
     if len(baseline_sizes) > 0:
-        ax.plot(baseline_sizes, baseline_means, marker="o", color="C1", label="Fisher-Yates (CUDA)")
+        ax.plot(baseline_sizes, baseline_means, marker="o", color="C1", label="Baseline")
         ax.fill_between(
             baseline_sizes, baseline_means - baseline_stds, baseline_means + baseline_stds, color="C1", alpha=0.2
         )
@@ -50,7 +50,8 @@ def plot_time_per_deck_size(
     ax.set_xscale("log", base=2)
     ax.set_xlabel("Deck Size")
     ax.set_ylabel("Time (ms)")
-    ax.set_title("POV Shuffle — Time per Deck Size")
+    fig.suptitle("Time per Deck Size")
+    ax.set_title("Close-to-uniform | Zero-copy | On GPU memory", fontsize=9)
     ax.legend(loc="upper left")
     ax.grid(True)
 
@@ -95,7 +96,8 @@ def plot_tvd_per_iteration(
 
     ax.set_xlabel("Iterations")
     ax.set_ylabel("Total Variation Distance")
-    ax.set_title("POV Shuffle — TVD per Iteration")
+    fig.suptitle("TVD per Iteration")
+    ax.set_title("POV and baseline deviations from uniform", fontsize=9)
     ax.grid(True)
     handles, labels = ax.get_legend_handles_labels()
     handles.append(Line2D([0], [0], color="black", linestyle="--"))

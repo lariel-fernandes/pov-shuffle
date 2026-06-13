@@ -1,0 +1,38 @@
+params:
+  seed: 42
+  num_samples: 3000
+  deck_size: 1024
+  max_iterations: 6
+  ngram_degrees:
+  - 2
+  - 3
+  povs_options:
+    physical_block_size: 32
+    virtual_block_size: 2
+    offsets:
+    - 0
+    - 2
+    - 4
+    - 6
+    - 8
+    - 10
+    - 12
+    - 14
+    - 16
+    - 18
+    - 20
+    - 22
+    - 24
+    - 26
+    - 28
+    - 30
+    gpu_thread_block_size: 32
+  device: cuda
+worker_data_scan_per_iter: 0.021333333333333333
+num_valid_offsets: 16
+ideal_worker_count: 16
+host_shuffle_load: 0.03125
+baseline_tvd: 0.22912267049153648
+baseline_ngram_tvds:
+- 0.0070981994211265905
+- 0.22840564875638505

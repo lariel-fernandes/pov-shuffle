@@ -44,12 +44,11 @@ extra-build-variables = { pov-shuffle = { POVS_CUDA_INSTANCE_SIZES = "32,96,128"
 
 ## Performance
 
-Total Variation Distance of the POV shuffle distribution when compared to an observed uniform shuffle distribution,
-in terms of positional bias an n-gram bias, with the evolution in the number of iterations.
+Total Variation Distance of a uniform shuffle distribution against the shuffle distributions obtained from POV and baseline algorithms (`np.shuffle`).
+- Assessed in terms of positional bias an n-gram bias, with the evolution in the number of iterations.
+- Using a dataset of 1k distinct elements and estimating the distributions from 3k independent shuffling episodes.
 
-Using a dataset of 1k distinct elements and estimating the distributions from 3k independent shuffling episodes.
-
-[![alt text](./data/tvd_per_iter/2026-05-17T23:01:07/tvd_per_iteration.png)](./data/tvd_per_iter/2026-05-17T23:01:07)
+[![alt text](./data/tvd_per_iter/2026-06-13T15:33:30/plot.png)](./data/tvd_per_iter/2026-06-13T15:33:30)
 
 ## Algorithm
 
