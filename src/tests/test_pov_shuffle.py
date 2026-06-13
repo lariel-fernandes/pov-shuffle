@@ -70,8 +70,6 @@ class _Case:
 def test_pov_shuffle(case: _Case, build_params: BuildParams) -> None:
     data = _make_deck(case.deck_size, case.instance_shape, case.device)
     options = optim_options_for_dataset(data) if case.options is None else case.options
-    if options.physical_block_size not in build_params.pblock_sizes:
-        pytest.skip(f"pblock_size={options.physical_block_size} not compiled in {build_params.pblock_sizes}")
     shuffle(data, iterations=case.iterations, options=options, seed=42)
     _check_integrity(data, case.deck_size, case.instance_shape)
 
