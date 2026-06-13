@@ -11,7 +11,7 @@
 #define POVS_CUDA_DISPATCH(vblock_val, pblock_val, instance_val, scalar_type_val, fn) \
     do { \
         if (vblock_val == 2 && pblock_val == 8 && instance_val == 1 && scalar_type_val == at::kFloat) { constexpr int VBLOCK_SIZE = 2, PBLOCK_SIZE = 8, INSTANCE_SIZE = 1; using scalar_t = float; fn; } \
-        else { TORCH_CHECK(false, "Unsupported povs_cuda combination:", " vblock=", vblock_val, " pblock=", pblock_val, " instance=", instance_val); } \
+        else { TORCH_CHECK(false, "Unsupported povs_cuda combination:", " vblock=", vblock_val, " pblock=", pblock_val, " instance=", instance_val, " scalar_type=", at::toString(scalar_type_val)); } \
     } while (0)
 // clang-format on
 #endif

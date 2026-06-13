@@ -153,7 +153,7 @@ def get_generated_files(opts: EnvVars) -> list[tuple[str, str]]:
             do {{ \\
                 if (false) {{}} \\
                 {cases}
-                else {{ TORCH_CHECK(false, "Unsupported povs_cuda combination:", " vblock=", vblock_val, " pblock=", pblock_val, " instance=", instance_val); }} \\
+                else {{ TORCH_CHECK(false, "Unsupported povs_cuda combination:", " vblock=", vblock_val, " pblock=", pblock_val, " instance=", instance_val, " scalar_type=", at::toString(scalar_type_val)); }} \\
             }} while (0)
     """.strip()).format(cases=cases)
 
