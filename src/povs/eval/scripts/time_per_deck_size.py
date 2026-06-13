@@ -23,7 +23,7 @@ params = TimePerDeckSizeParams(
     num_warmup_runs=10,
     povs_options_per_deck_size={},
     default_options=Options(virtual_block_size=2, physical_block_size=16),
-    dtype=torch.float32.__str__(),
+    dtype=torch.float32.__str__().split(".")[-1],
 )
 
 # Run experiment
