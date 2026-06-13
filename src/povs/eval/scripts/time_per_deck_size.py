@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import torch
 
+from povs.types import Options
+
 from ..exercises import shuffle_time_per_deck_size
 from ..io import save_time_per_deck_size_report
 from ..params import TimePerDeckSizeParams
@@ -20,6 +22,7 @@ params = TimePerDeckSizeParams(
     num_runs=50,
     num_warmup_runs=10,
     povs_options_per_deck_size={},
+    default_options=Options(virtual_block_size=2, physical_block_size=16),
     dtype=torch.float32.__str__(),
 )
 
@@ -32,26 +35,23 @@ result = shuffle_time_per_deck_size(
     num_runs=params.num_runs,
     num_warmup_runs=params.num_warmup_runs,
     povs_options_per_deck_size=params.povs_options_per_deck_size,
+    default_options=params.default_options,
     dtype=getattr(torch, params.dtype),
     seed=params.seed,
 )
 
-# Compute stats
-pov_means = [float(np.mean(t)) for t in result.pov_times_ms]
-pov_stds = [float(np.std(t)) for t in result.pov_times_ms]
-baseline_means = [float(np.mean(t)) for t in result.baseline_times_ms]
-baseline_stds = [float(np.std(t)) for t in result.baseline_times_ms]
-speedups = [b / p for b, p in zip(baseline_means, pov_means)]
+# Compute stats (None where the run failed)
+pov_means = [float(np.mean(t)) if t is not None else None for t in result.pov_times_ms]
+pov_stds = [float(np.std(t)) if t is not None else None for t in result.pov_times_ms]
+baseline_means = [float(np.mean(t)) if t is not None else None for t in result.baseline_times_ms]
+baseline_stds = [float(np.std(t)) if t is not None else None for t in result.baseline_times_ms]
+speedups = [b / p if b is not None and p is not None else None for b, p in zip(baseline_means, pov_means)]
 
 # Put together the report
 report = TimePerDeckSizeReport(
     params=params._replace(
         povs_options_per_deck_size={
-            size: options
-            for size, options in zip(
-                params.deck_sizes,
-                result.option_sets,
-            )
+            size: options for size, options in zip(params.deck_sizes, result.option_sets) if options is not None
         }
     ),
     timings=pd.DataFrame({

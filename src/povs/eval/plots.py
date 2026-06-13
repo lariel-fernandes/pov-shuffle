@@ -6,32 +6,46 @@ from matplotlib.lines import Line2D
 
 def plot_time_per_deck_size(
     deck_sizes: list[int],
-    pov_means_ms: list[float],
-    pov_stds_ms: list[float],
-    baseline_means_ms: list[float],
-    baseline_stds_ms: list[float],
+    pov_means_ms: list[float | None],
+    pov_stds_ms: list[float | None],
+    baseline_means_ms: list[float | None],
+    baseline_stds_ms: list[float | None],
 ) -> matplotlib.figure.Figure:
     """Plot shuffle time vs deck size for POV Shuffle and Fisher-Yates CUDA baseline.
 
     :param deck_sizes: Deck sizes along the x-axis.
-    :param pov_means_ms: Mean POV Shuffle time per deck size, in milliseconds.
+    :param pov_means_ms: Mean POV Shuffle time per deck size in ms; None entries are omitted.
     :param pov_stds_ms: Standard deviation of POV Shuffle time per deck size.
-    :param baseline_means_ms: Mean Fisher-Yates (CUDA) time per deck size, in milliseconds.
+    :param baseline_means_ms: Mean Fisher-Yates (CUDA) time per deck size in ms; None entries are omitted.
     :param baseline_stds_ms: Standard deviation of baseline time per deck size.
     :returns: Matplotlib figure.
     """
-    pov_means = np.array(pov_means_ms)
-    pov_stds = np.array(pov_stds_ms)
-    baseline_means = np.array(baseline_means_ms)
-    baseline_stds = np.array(baseline_stds_ms)
-    speedups = baseline_means / pov_means
+    pov_valid = [(s, m, st) for s, m, st in zip(deck_sizes, pov_means_ms, pov_stds_ms) if m is not None]
+    baseline_valid = [(s, m, st) for s, m, st in zip(deck_sizes, baseline_means_ms, baseline_stds_ms) if m is not None]
+
+    pov_sizes = [s for s, _, _ in pov_valid]
+    pov_means = np.array([m for _, m, _ in pov_valid])
+    pov_stds = np.array([st for _, _, st in pov_valid])
+
+    baseline_sizes = [s for s, _, _ in baseline_valid]
+    baseline_means = np.array([m for _, m, _ in baseline_valid])
+    baseline_stds = np.array([st for _, _, st in baseline_valid])
+
+    pov_mean_by_size = {s: m for s, m, _ in pov_valid}
+    baseline_mean_by_size = {s: m for s, m, _ in baseline_valid}
+    speedup_sizes = sorted(set(pov_mean_by_size) & set(baseline_mean_by_size))
+    speedups = [baseline_mean_by_size[s] / pov_mean_by_size[s] for s in speedup_sizes]
 
     fig, ax = plt.subplots()
 
-    ax.plot(deck_sizes, pov_means, marker="o", color="C0", label="POV Shuffle")
-    ax.fill_between(deck_sizes, pov_means - pov_stds, pov_means + pov_stds, color="C0", alpha=0.2)
-    ax.plot(deck_sizes, baseline_means, marker="o", color="C1", label="Fisher-Yates (CUDA)")
-    ax.fill_between(deck_sizes, baseline_means - baseline_stds, baseline_means + baseline_stds, color="C1", alpha=0.2)
+    if len(pov_sizes) > 0:
+        ax.plot(pov_sizes, pov_means, marker="o", color="C0", label="POV Shuffle")
+        ax.fill_between(pov_sizes, pov_means - pov_stds, pov_means + pov_stds, color="C0", alpha=0.2)
+    if len(baseline_sizes) > 0:
+        ax.plot(baseline_sizes, baseline_means, marker="o", color="C1", label="Fisher-Yates (CUDA)")
+        ax.fill_between(
+            baseline_sizes, baseline_means - baseline_stds, baseline_means + baseline_stds, color="C1", alpha=0.2
+        )
 
     ax.set_xscale("log", base=2)
     ax.set_xlabel("Deck Size")
@@ -41,7 +55,8 @@ def plot_time_per_deck_size(
     ax.grid(True)
 
     ax2 = ax.twinx()
-    ax2.plot(deck_sizes, speedups, marker="s", linestyle="--", color="C2", label="Speedup (baseline / POV)")
+    if len(speedup_sizes) > 0:
+        ax2.plot(speedup_sizes, speedups, marker="s", linestyle="--", color="C2", label="Speedup (baseline / POV)")
     ax2.axhline(y=1.0, color="gray", linestyle=":", linewidth=0.8)
     ax2.set_ylabel("Speedup (×)")
     ax2.legend(loc="upper right")

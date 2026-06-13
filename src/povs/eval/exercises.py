@@ -12,9 +12,11 @@ from .utils import time_cuda_op
 
 
 class ShuffleTimePerDeckSizeResult(NamedTuple):
-    pov_times_ms: list[list[float]]  # outer: per deck_size, inner: per run
-    baseline_times_ms: list[list[float]]  # outer: per deck_size, inner: per run
-    option_sets: list[FullOptions]
+    pov_times_ms: list[list[float] | None]  # outer: per deck_size, inner: per run, None if error
+    baseline_times_ms: list[list[float] | None]  # outer: per deck_size, inner: per run, None if error
+    option_sets: list[FullOptions | None]  # one per deck_size
+    pov_errors: list[Exception | None]  # one per deck_size
+    baseline_errors: list[Exception | None]  # one per deck_size
 
 
 def shuffle_time_per_deck_size(
@@ -24,6 +26,7 @@ def shuffle_time_per_deck_size(
     num_runs: int,
     num_warmup_runs: int,
     povs_options_per_deck_size: dict[int, Options | None],
+    default_options: Options | None,
     dtype: torch.dtype,
     seed: int,
 ) -> ShuffleTimePerDeckSizeResult:
@@ -35,42 +38,57 @@ def shuffle_time_per_deck_size(
     :param num_runs: Number of timed runs per deck size.
     :param num_warmup_runs: Number of warm-up calls before measurement.
     :param povs_options_per_deck_size: POV Shuffle options to use for each deck size.
+    :param default_options: Default POV Shuffle options for deck sizes without specific options.
     :param dtype: Numeric data type.
     :param seed: Base seed; each deck size gets an independent derived seed.
     """
     pov_times = []
     baseline_times = []
     option_sets = []
+    pov_errors: list[Exception | None] = []
+    baseline_errors: list[Exception | None] = []
 
     for i, deck_size in enumerate(tqdm(deck_sizes, desc="Deck sizes")):
         data = torch.zeros(deck_size, instance_size, dtype=dtype, device="cuda")
-        options = optim_options_for_dataset(data, povs_options_per_deck_size.get(deck_size))
-        option_sets.append(options)
+        pov_error: Exception | None = None
+        baseline_error: Exception | None = None
+        pov_run_times: list[float] | None = None
+        baseline_run_times: list[float] | None = None
+        cur_options: FullOptions | None = None
 
-        gen = torch.Generator(device="cuda")
-        gen.manual_seed(seed + i)
-        pov_times.append(
-            time_cuda_op(
-                lambda: shuffle(data, iterations=iterations, options=options, seed=gen),
+        try:
+            cur_options = optim_options_for_dataset(data, povs_options_per_deck_size.get(deck_size) or default_options)
+            pov_run_times = time_cuda_op(
+                lambda: shuffle(data, iterations=iterations, options=cur_options, seed=seed),
                 num_warmup=num_warmup_runs,
                 num_runs=num_runs,
             )
-        )
+        except Exception as e:
+            pov_error = e
 
-        baseline_gen = torch.Generator(device="cuda")
-        baseline_gen.manual_seed(seed + i + len(deck_sizes))
-        baseline_times.append(
-            time_cuda_op(
-                lambda: data.copy_(data[torch.randperm(data.shape[0], device=data.device, generator=baseline_gen)]),
+        try:
+            baseline_gen = torch.Generator(device="cuda")
+            baseline_gen.manual_seed(seed + i + len(deck_sizes))
+            baseline_run_times = time_cuda_op(
+                lambda: _baseline_torch_shuffle(data, baseline_gen),
                 num_warmup=num_warmup_runs,
                 num_runs=num_runs,
             )
-        )
+        except Exception as e:
+            baseline_error = e
+
+        option_sets.append(cur_options)
+        pov_times.append(pov_run_times)
+        baseline_times.append(baseline_run_times)
+        pov_errors.append(pov_error)
+        baseline_errors.append(baseline_error)
 
     return ShuffleTimePerDeckSizeResult(
         pov_times_ms=pov_times,
         baseline_times_ms=baseline_times,
         option_sets=option_sets,
+        pov_errors=pov_errors,
+        baseline_errors=baseline_errors,
     )
 
 
@@ -127,3 +145,27 @@ def tvd_per_iteration(
         baseline_ngram_tvds=baseline_ngram_tvds,
         options=options,
     )
+
+
+def _baseline_torch_shuffle(data: torch.Tensor, gen: torch.Generator) -> None:
+    """For a fair comparison with the algorithm we perform a truly uniform, zero-copy, in-place shuffle."""
+    n = data.shape[0]
+    perm = torch.randperm(n, device=data.device, generator=gen).cpu().numpy()
+    visited = np.zeros(n, dtype=bool)
+    buf = torch.empty_like(data[0])
+    for start in range(n):
+        if visited[start]:
+            continue
+        j = int(perm[start])
+        if j == start:
+            visited[start] = True
+            continue
+        buf.copy_(data[start])
+        i = start
+        while j != start:
+            data[i].copy_(data[j])
+            visited[i] = True
+            i = j
+            j = int(perm[i])
+        data[i].copy_(buf)
+        visited[i] = True

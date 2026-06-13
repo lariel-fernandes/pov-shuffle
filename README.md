@@ -1,7 +1,7 @@
 # POV Shuffle
 _**P**arallel **O**ffset **V**irtual-block Shuffle_
 
-A parallelizable, iterative algorithm for efficiently shuffling large datasets in place at scale,
+A fully parallel algorithm for efficiently shuffling large datasets without copy,
 while sufficiently approximating a uniform shuffle within few iterations.
 
 ## Usage
@@ -60,7 +60,8 @@ Using a dataset of 1k distinct elements and estimating the distributions from 3k
    - Randomly assign each few physical blocks to a virtual block, so every virtual block is contiguous by parts.
    - Each worker thread shuffles its assigned virtual block in place, using a standard shuffle algorithm (e.g. Fisher-Yates).
 
-Because there is no overlap between virtual blocks, the shuffling can be done in parallel and in-place without facing race conditions.
+Because there is no overlap between virtual blocks, the algorithm can be fully parallelized without facing race conditions,
+and doesn't require a temporary copy of the whole dataset to perform the shuffle in place.
 
 Compared to a traditional local-block shuffle, the virtual block assignment significantly reduces positional bias,
 while the random offset prevents the occurrence of shuffle artifacts from the physical block boundaries.
