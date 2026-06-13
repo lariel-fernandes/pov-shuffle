@@ -5,8 +5,6 @@ import numpy as np
 import pandas as pd
 import torch
 
-from povs import Options
-
 from ..exercises import shuffle_time_per_deck_size
 from ..io import save_time_per_deck_size_report
 from ..params import TimePerDeckSizeParams
@@ -21,15 +19,7 @@ params = TimePerDeckSizeParams(
     instance_size=128,
     num_runs=50,
     num_warmup_runs=10,
-    povs_options_per_deck_size={
-        256: Options(physical_block_size=16, virtual_block_size=3),
-        512: Options(physical_block_size=32, virtual_block_size=3),
-        1024: Options(physical_block_size=32, virtual_block_size=3),
-        2048: Options(physical_block_size=32, virtual_block_size=4),
-        4096: Options(physical_block_size=64, virtual_block_size=4),
-        8192: Options(physical_block_size=64, virtual_block_size=4),
-        16384: Options(physical_block_size=128, virtual_block_size=4),
-    },
+    povs_options_per_deck_size={},
     dtype=torch.float32.__str__(),
 )
 
@@ -59,7 +49,7 @@ report = TimePerDeckSizeReport(
         povs_options_per_deck_size={
             size: options
             for size, options in zip(
-                params.povs_options_per_deck_size.keys(),
+                params.deck_sizes,
                 result.option_sets,
             )
         }

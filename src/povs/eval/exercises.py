@@ -44,7 +44,7 @@ def shuffle_time_per_deck_size(
 
     for i, deck_size in enumerate(tqdm(deck_sizes, desc="Deck sizes")):
         data = torch.zeros(deck_size, instance_size, dtype=dtype, device="cuda")
-        options = optim_options_for_dataset(data, povs_options_per_deck_size[deck_size])
+        options = optim_options_for_dataset(data, povs_options_per_deck_size.get(deck_size))
         option_sets.append(options)
 
         gen = torch.Generator(device="cuda")
