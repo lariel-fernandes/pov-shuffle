@@ -5,8 +5,6 @@ import numpy as np
 import pandas as pd
 import torch
 
-from povs.types import Options
-
 from ..exercises import shuffle_time_per_deck_size
 from ..io import save_time_per_deck_size_report
 from ..params import TimePerDeckSizeParams
@@ -20,15 +18,18 @@ params = TimePerDeckSizeParams(
         10_000,
         50_000,
         100_000,
+        500_000,
+        1_000_000,
     ],
     iterations=4,
-    instance_size=8,
+    instance_size=128,
     num_runs=50,
     num_warmup_runs=10,
     povs_options_per_deck_size={},
-    default_options=Options(virtual_block_size=4, physical_block_size=32),
-    dtype=torch.float32.__str__().split(".")[-1],
+    default_options=None,
+    dtype=torch.float16.__str__().split(".")[-1],
     tolerate_errors=False,
+    cuda_device_id=0,
 )
 
 # Run experiment
@@ -44,6 +45,7 @@ result = shuffle_time_per_deck_size(
     dtype=getattr(torch, params.dtype),
     seed=params.seed,
     tolerate_errors=params.tolerate_errors,
+    cuda_device_id=params.cuda_device_id,
 )
 
 # Compute stats (None where the run failed)
@@ -52,6 +54,9 @@ pov_stds = [float(np.std(t)) if t is not None else None for t in result.pov_time
 baseline_means = [float(np.mean(t)) if t is not None else None for t in result.baseline_times_ms]
 baseline_stds = [float(np.std(t)) if t is not None else None for t in result.baseline_times_ms]
 speedups = [b / p if b is not None and p is not None else None for b, p in zip(baseline_means, pov_means)]
+
+# Query device specs from the GPU used during the experiment
+_cc_major, _cc_minor = torch.cuda.get_device_capability(params.cuda_device_id)
 
 # Put together the report
 report = TimePerDeckSizeReport(
@@ -77,6 +82,8 @@ report = TimePerDeckSizeReport(
     ),
     pov_errors={size: err for size, err in zip(params.deck_sizes, result.pov_errors) if err is not None},
     baseline_errors={size: err for size, err in zip(params.deck_sizes, result.baseline_errors) if err is not None},
+    cuda_device_name=torch.cuda.get_device_name(params.cuda_device_id),
+    cuda_compute_capability=_cc_major + _cc_minor / 10,
 )
 
 # Save the report

@@ -30,6 +30,7 @@ def shuffle_time_per_deck_size(
     dtype: torch.dtype,
     seed: int,
     tolerate_errors: bool,
+    cuda_device_id: int = 0,
 ) -> ShuffleTimePerDeckSizeResult:
     """Measure POV Shuffle time and Fisher-Yates CUDA baseline time across deck sizes.
 
@@ -43,6 +44,7 @@ def shuffle_time_per_deck_size(
     :param dtype: Numeric data type.
     :param seed: Base seed; each deck size gets an independent derived seed.
     :param tolerate_errors: If False, re-raise the first error immediately; if True, record it and continue.
+    :param cuda_device_id: Integer ID of the CUDA device on which to allocate and time operations.
     """
     pov_times = []
     baseline_times = []
@@ -51,7 +53,7 @@ def shuffle_time_per_deck_size(
     baseline_errors: list[Exception | None] = []
 
     for i, deck_size in enumerate(tqdm(deck_sizes, desc="Deck sizes")):
-        data = torch.zeros(deck_size, instance_size, dtype=dtype, device="cuda")
+        data = torch.zeros(deck_size, instance_size, dtype=dtype, device=f"cuda:{cuda_device_id}")
         pov_error: Exception | None = None
         baseline_error: Exception | None = None
         pov_run_times: list[float] | None = None
@@ -71,7 +73,7 @@ def shuffle_time_per_deck_size(
             pov_error = e
 
         try:
-            baseline_gen = torch.Generator(device="cuda")
+            baseline_gen = torch.Generator(device=f"cuda:{cuda_device_id}")
             baseline_gen.manual_seed(seed + i + len(deck_sizes))
             baseline_run_times = time_cuda_op(
                 lambda: _baseline_torch_shuffle(data, baseline_gen),

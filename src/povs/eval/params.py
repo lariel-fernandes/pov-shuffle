@@ -15,6 +15,7 @@ class TimePerDeckSizeParams(NamedTuple):
     - `povs_options_per_deck_size`: POV Shuffle options to use for each deck size, keyed by deck size.
     - `tolerate_errors`: If ``True``, errors during timing are recorded and the experiment continues.
       If ``False``, the first error is re-raised immediately.
+    - `cuda_device_id`: Integer ID of the CUDA device on which tensors are allocated and benchmarked.
     """
 
     seed: int
@@ -27,6 +28,7 @@ class TimePerDeckSizeParams(NamedTuple):
     default_options: Options | None
     dtype: str
     tolerate_errors: bool
+    cuda_device_id: int = 0
 
 
 class TVDPerIterParams(NamedTuple):

@@ -24,6 +24,8 @@ class TimePerDeckSizeReport(NamedTuple):
 
     - `pov_errors`: Exceptions raised during POV Shuffle timing, keyed by deck size.
     - `baseline_errors`: Exceptions raised during baseline timing, keyed by deck size.
+    - `cuda_device_name`: Name of the GPU used (e.g. ``"NVIDIA A100 80GB PCIe"``).
+    - `cuda_compute_capability`: Compute capability of the GPU as a float (e.g. ``8.9``).
     """
 
     params: TimePerDeckSizeParams
@@ -31,6 +33,8 @@ class TimePerDeckSizeReport(NamedTuple):
     plot: matplotlib.figure.Figure
     pov_errors: dict[int, Exception]
     baseline_errors: dict[int, Exception]
+    cuda_device_name: str
+    cuda_compute_capability: float
 
 
 class TVDPerIterReport(NamedTuple):
