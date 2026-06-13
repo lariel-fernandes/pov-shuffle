@@ -35,6 +35,7 @@ class TVDPerIterParams(NamedTuple):
     - `max_iterations`: Number of shuffle iterations tested (from 1 to this value, inclusive).
     - `povs_options`: POV Shuffle algorithm options used in this run.
     - `ngram_degrees`: N-gram degrees for which TVD was measured.
+    - `device`: Torch device on which the deck tensor lives and is shuffled (e.g. ``"cpu"``, ``"cuda"``).
     """
 
     seed: int
@@ -43,3 +44,4 @@ class TVDPerIterParams(NamedTuple):
     max_iterations: int
     ngram_degrees: list[int]
     povs_options: Options | None
+    device: str

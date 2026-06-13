@@ -24,6 +24,7 @@ params = TVDPerIterParams(
         virtual_block_size=2,
         physical_block_size=32,
     ),
+    device="cuda",
 )
 
 # Run experiment
@@ -35,6 +36,7 @@ result = tvd_per_iteration(
     options=params.povs_options,
     rng=np.random.default_rng(params.seed),
     ngram_degrees=params.ngram_degrees,
+    device=params.device,
 )
 
 # Put together the report

@@ -107,6 +107,7 @@ def tvd_per_iteration(
     options: Options | None,
     rng: np.random.Generator,
     ngram_degrees: list[int],
+    device: str,
 ) -> TVDPerIterResult:
     """Measure the Total Variation Distance of the deck shuffling as a function of the number of shuffle iterations.
 
@@ -116,27 +117,29 @@ def tvd_per_iteration(
     :param options: POV Shuffle algorithm options.
     :param rng: Random number generator for reproducibility.
     :param ngram_degrees: N-gram degrees for which to compute TVD at each iteration.
+    :param device: Torch device on which to allocate and shuffle the deck tensor.
     """
-    deck = np.arange(deck_size)
+    deck = torch.arange(deck_size, device=device)
     options = optim_options_for_dataset(deck, options)
 
     tvds = np.zeros(max_iterations, dtype=float)
     ngram_tvds = np.zeros((max_iterations, len(ngram_degrees)), dtype=float)
 
     # Initialize samples and determine the TVD of the POV Shuffle after each iteration
-    samples = np.tile(deck, num_samples).reshape(num_samples, deck_size)
+    samples = deck.unsqueeze(0).expand(num_samples, -1).clone()
     for i in tqdm(range(max_iterations), desc="Iterations"):
         for sample_id in tqdm(range(num_samples), desc="Samples", leave=False):
             shuffle(samples[sample_id], iterations=1, seed=rng, options=options)
-        tvds[i] = get_tvd(samples)
-        ngram_tvds[i, :] = np.array([get_ngram_tvd(samples, n) for n in ngram_degrees])
+        samples_np = samples.cpu().numpy()
+        tvds[i] = get_tvd(samples_np)
+        ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n) for n in ngram_degrees])
 
     # Re-initialize samples and determine the TVD of a perfect shuffle (baseline)
-    samples = np.tile(deck, num_samples).reshape(num_samples, deck_size)
+    samples_np = deck.unsqueeze(0).expand(num_samples, -1).clone().cpu().numpy()
     for sample_id in tqdm(range(num_samples), desc="Samples (baseline)"):
-        rng.shuffle(samples[sample_id])
-    baseline_tvd = get_tvd(samples)
-    baseline_ngram_tvds = np.array([get_ngram_tvd(samples, n) for n in ngram_degrees])
+        rng.shuffle(samples_np[sample_id])
+    baseline_tvd = get_tvd(samples_np)
+    baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n) for n in ngram_degrees])
 
     return TVDPerIterResult(
         tvds=tvds,
