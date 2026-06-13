@@ -61,7 +61,7 @@ Shuffle time per deck size with 4-iterations POVS on instances of shape `(128 x 
 For a fair comparison with the algorithm, which offers close-to-uniform, zero-copy, in-place shuffling,
 the used baseline is `numpy.shuffle`, which is also a uniform shuffle (Fisher-Yates), performed in-place and without copy.
 
-[![alt text](./data/time_per_deck_size/2026-06-13T20:37:25/plot.png)](./data/time_per_deck_size/2026-06-13T20:37:25)
+[![alt text](./data/time_per_deck_size/2026-06-13T20:54:09/plot.png)](./data/time_per_deck_size/2026-06-13T20:54:09)
 
 ## Algorithm
 

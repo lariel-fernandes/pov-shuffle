@@ -47,7 +47,7 @@ def plot_time_per_deck_size(
             baseline_sizes, baseline_means - baseline_stds, baseline_means + baseline_stds, color="C1", alpha=0.2
         )
 
-    ax.set_xscale("log", base=2)
+    ax.set_xscale("log", base=10)
     ax.set_xlabel("Deck Size")
     ax.set_ylabel("Time (ms)")
     fig.suptitle("Time per Deck Size")
