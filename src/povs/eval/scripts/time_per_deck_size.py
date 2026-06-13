@@ -16,14 +16,19 @@ from ..reports import TimePerDeckSizeReport
 # Parameters
 params = TimePerDeckSizeParams(
     seed=42,
-    deck_sizes=[256, 512, 1024, 2048, 4096, 8192, 16384],
-    iterations=1,
-    instance_size=128,
+    deck_sizes=[
+        10_000,
+        50_000,
+        100_000,
+    ],
+    iterations=4,
+    instance_size=8,
     num_runs=50,
     num_warmup_runs=10,
     povs_options_per_deck_size={},
-    default_options=Options(virtual_block_size=2, physical_block_size=16),
+    default_options=Options(virtual_block_size=4, physical_block_size=32),
     dtype=torch.float32.__str__().split(".")[-1],
+    tolerate_errors=False,
 )
 
 # Run experiment
@@ -38,6 +43,7 @@ result = shuffle_time_per_deck_size(
     default_options=params.default_options,
     dtype=getattr(torch, params.dtype),
     seed=params.seed,
+    tolerate_errors=params.tolerate_errors,
 )
 
 # Compute stats (None where the run failed)
@@ -69,6 +75,8 @@ report = TimePerDeckSizeReport(
         baseline_means_ms=baseline_means,
         baseline_stds_ms=baseline_stds,
     ),
+    pov_errors={size: err for size, err in zip(params.deck_sizes, result.pov_errors) if err is not None},
+    baseline_errors={size: err for size, err in zip(params.deck_sizes, result.baseline_errors) if err is not None},
 )
 
 # Save the report

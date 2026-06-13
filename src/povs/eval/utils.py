@@ -1,3 +1,4 @@
+import traceback
 from collections.abc import Callable
 from typing import Any, Type
 
@@ -14,6 +15,9 @@ class _Dumper(_yaml.Dumper):
     def represent_data(self, data):
         if isinstance(data, tuple) and callable(f := getattr(data, "_asdict", None)):
             data = f()
+
+        if isinstance(data, Exception):
+            data = "".join(traceback.format_exception(type(data), data, data.__traceback__))
 
         return super().represent_data(data)
 

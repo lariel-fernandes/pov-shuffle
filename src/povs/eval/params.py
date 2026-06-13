@@ -13,6 +13,8 @@ class TimePerDeckSizeParams(NamedTuple):
     - `num_runs`: Number of timed runs per deck size (for averaging).
     - `num_warmup_runs`: Number of warm-up calls before timing begins (not measured).
     - `povs_options_per_deck_size`: POV Shuffle options to use for each deck size, keyed by deck size.
+    - `tolerate_errors`: If ``True``, errors during timing are recorded and the experiment continues.
+      If ``False``, the first error is re-raised immediately.
     """
 
     seed: int
@@ -24,6 +26,7 @@ class TimePerDeckSizeParams(NamedTuple):
     povs_options_per_deck_size: dict[int, Options | None]
     default_options: Options | None
     dtype: str
+    tolerate_errors: bool
 
 
 class TVDPerIterParams(NamedTuple):

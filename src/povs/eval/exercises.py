@@ -29,6 +29,7 @@ def shuffle_time_per_deck_size(
     default_options: Options | None,
     dtype: torch.dtype,
     seed: int,
+    tolerate_errors: bool,
 ) -> ShuffleTimePerDeckSizeResult:
     """Measure POV Shuffle time and Fisher-Yates CUDA baseline time across deck sizes.
 
@@ -41,6 +42,7 @@ def shuffle_time_per_deck_size(
     :param default_options: Default POV Shuffle options for deck sizes without specific options.
     :param dtype: Numeric data type.
     :param seed: Base seed; each deck size gets an independent derived seed.
+    :param tolerate_errors: If False, re-raise the first error immediately; if True, record it and continue.
     """
     pov_times = []
     baseline_times = []
@@ -64,6 +66,8 @@ def shuffle_time_per_deck_size(
                 num_runs=num_runs,
             )
         except Exception as e:
+            if not tolerate_errors:
+                raise
             pov_error = e
 
         try:
@@ -75,6 +79,8 @@ def shuffle_time_per_deck_size(
                 num_runs=num_runs,
             )
         except Exception as e:
+            if not tolerate_errors:
+                raise
             baseline_error = e
 
         option_sets.append(cur_options)

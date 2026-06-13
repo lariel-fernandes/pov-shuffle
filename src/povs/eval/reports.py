@@ -21,11 +21,16 @@ class TimePerDeckSizeReport(NamedTuple):
       - `baseline_mean_ms`: Mean Fisher-Yates (CUDA randperm + copy) time in milliseconds.
       - `baseline_std_ms`: Standard deviation of baseline time.
       - `speedup`: Ratio `baseline_mean_ms / pov_mean_ms`. Values > 1 mean POV Shuffle is faster.
+
+    - `pov_errors`: Exceptions raised during POV Shuffle timing, keyed by deck size.
+    - `baseline_errors`: Exceptions raised during baseline timing, keyed by deck size.
     """
 
     params: TimePerDeckSizeParams
     timings: pd.DataFrame
     plot: matplotlib.figure.Figure
+    pov_errors: dict[int, Exception]
+    baseline_errors: dict[int, Exception]
 
 
 class TVDPerIterReport(NamedTuple):
