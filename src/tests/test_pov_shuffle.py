@@ -92,6 +92,7 @@ def _check_integrity(data: np.ndarray | torch.Tensor, deck_size: int, instance_s
     instance_ids = flat[:, 0].astype(np.int64) // instance_size
 
     assert sorted(instance_ids.tolist()) == list(range(deck_size)), "deck integrity failed"
+    assert instance_ids.tolist() != list(range(deck_size)), "deck was not shuffled"
 
     expected = (instance_ids[:, None] * instance_size + np.arange(instance_size)).astype(np.float32)
     assert np.array_equal(flat, expected), "instance integrity failed"
