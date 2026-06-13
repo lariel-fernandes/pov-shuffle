@@ -46,18 +46,22 @@ POVS_CUDA_INSTANCE_SIZES = "32,96,128"  # Add support for these instance sizes, 
 
 ## Performance
 
+### TVD
+
 Total Variation Distance of a uniform shuffle distribution against the shuffle distributions obtained from POV and baseline algorithms (`np.shuffle`).
-- Assessed in terms of positional bias an n-gram bias, with the evolution in the number of iterations.
+- Assessed in terms of positional bias and n-gram bias, with the evolution of POVS in the number of iterations.
 - Using a dataset of 1k distinct elements and estimating the distributions from 3k independent shuffling episodes.
 
 [![alt text](./data/tvd_per_iter/2026-06-13T15:33:30/plot.png)](./data/tvd_per_iter/2026-06-13T15:33:30)
 
+### Shuffle Time
+
 Shuffle time per deck size with 4-iterations POVS on instances of shape `(128 x float16)`, using the NVIDIA Ada Lovelace architecture.
 
 For a fair comparison with the algorithm, which offers close-to-uniform, zero-copy, in-place shuffling,
-the used baseline is also a uniform shuffle (Fisher-Yates), performed in-place and without copy on GPU memory.
+the used baseline is `numpy.shuffle`, which is also a uniform shuffle (Fisher-Yates), performed in-place and without copy.
 
-[![alt text](./data/time_per_deck_size/2026-06-13T18:06:50/plot.png)](./data/time_per_deck_size/2026-06-13T18:06:50)
+[![alt text](./data/time_per_deck_size/2026-06-13T20:37:25/plot.png)](./data/time_per_deck_size/2026-06-13T20:37:25)
 
 ## Algorithm
 

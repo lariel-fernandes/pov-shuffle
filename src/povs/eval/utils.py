@@ -1,3 +1,4 @@
+import time
 import traceback
 from collections.abc import Callable
 from typing import Any, Type
@@ -44,6 +45,25 @@ def time_cuda_op(op: Callable, num_warmup: int, num_runs: int) -> list[float]:
         end.record()
         torch.cuda.synchronize()
         times_ms.append(start.elapsed_time(end))
+
+    return times_ms
+
+
+def time_cpu_op(op: Callable, num_warmup: int, num_runs: int) -> list[float]:
+    """Time a CPU operation using perf_counter. Returns per-run elapsed times in milliseconds.
+
+    :param op: Callable to time.
+    :param num_warmup: Number of warm-up calls before measurement (not timed).
+    :param num_runs: Number of timed calls.
+    """
+    for _ in range(num_warmup):
+        op()
+
+    times_ms = []
+    for _ in range(num_runs):
+        t0 = time.perf_counter()
+        op()
+        times_ms.append((time.perf_counter() - t0) * 1000)
 
     return times_ms
 

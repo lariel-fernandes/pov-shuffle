@@ -51,7 +51,7 @@ def plot_time_per_deck_size(
     ax.set_xlabel("Deck Size")
     ax.set_ylabel("Time (ms)")
     fig.suptitle("Time per Deck Size")
-    ax.set_title("Close-to-uniform | Zero-copy | On GPU memory", fontsize=9)
+    ax.set_title("Close-to-uniform | Zero-copy", fontsize=9)
     ax.legend(loc="upper left")
     ax.grid(True)
 

@@ -8,7 +8,7 @@ from povs import optim_options_for_dataset, shuffle
 from povs.types import FullOptions, Options
 
 from .metrics import get_ngram_tvd, get_tvd
-from .utils import time_cuda_op
+from .utils import time_cpu_op, time_cuda_op
 
 
 class ShuffleTimePerDeckSizeResult(NamedTuple):
@@ -73,10 +73,10 @@ def shuffle_time_per_deck_size(
             pov_error = e
 
         try:
-            baseline_gen = torch.Generator(device=f"cuda:{cuda_device_id}")
-            baseline_gen.manual_seed(seed + i + len(deck_sizes))
-            baseline_run_times = time_cuda_op(
-                lambda: _baseline_torch_shuffle(data, baseline_gen),
+            baseline_rng = np.random.default_rng(seed + i + len(deck_sizes))
+            baseline_data = torch.zeros(deck_size, instance_size, dtype=dtype).numpy()
+            baseline_run_times = time_cpu_op(
+                lambda: baseline_rng.shuffle(baseline_data),
                 num_warmup=num_warmup_runs,
                 num_runs=num_runs,
             )
@@ -156,27 +156,3 @@ def tvd_per_iteration(
         baseline_ngram_tvds=baseline_ngram_tvds,
         options=options,
     )
-
-
-def _baseline_torch_shuffle(data: torch.Tensor, gen: torch.Generator) -> None:
-    """For a fair comparison with the algorithm we perform a truly uniform, zero-copy, in-place shuffle."""
-    n = data.shape[0]
-    perm = torch.randperm(n, device=data.device, generator=gen).cpu().numpy()
-    visited = np.zeros(n, dtype=bool)
-    buf = torch.empty_like(data[0])
-    for start in range(n):
-        if visited[start]:
-            continue
-        j = int(perm[start])
-        if j == start:
-            visited[start] = True
-            continue
-        buf.copy_(data[start])
-        i = start
-        while j != start:
-            data[i].copy_(data[j])
-            visited[i] = True
-            i = j
-            j = int(perm[i])
-        data[i].copy_(buf)
-        visited[i] = True
