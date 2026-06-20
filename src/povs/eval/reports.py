@@ -67,6 +67,9 @@ class TVDPerIterReport(NamedTuple):
       - `cumulative_exposure`: Fraction of the dataset scanned by each worker up to that iteration.
 
     - `ngram_tvds`: DataFrame with one row per iteration and one column per degree in `ngram_degrees`
+
+    - `sample_deficits`: How many more samples would be needed to observe all valid events at least once,
+      per metric. Keys: ``"positional"``, ``"{n}-gram"``. Zero when exactly covered; negative when oversampled.
     """
 
     params: TVDPerIterParams
@@ -79,6 +82,7 @@ class TVDPerIterReport(NamedTuple):
     tvds: pd.DataFrame
     ngram_tvds: pd.DataFrame
     plot: matplotlib.figure.Figure
+    sample_deficits: dict[str, int]
 
 
 class BreakingPointPerDeckSizeReport(NamedTuple):
@@ -97,9 +101,14 @@ class BreakingPointPerDeckSizeReport(NamedTuple):
 
     - `non_convergences`: Metrics that did not converge within the iteration limit, keyed by deck size.
       Each value is a list of metric names (e.g. ``["positional", "3-gram"]``).
+
+    - `sample_deficits`: Sample deficit per deck size per metric. Outer key: deck size. Inner key:
+      metric name (``"positional"``, ``"{n}-gram"``). Value: ``num_valid - num_samples * deck_size``
+      (positive = undersampled; negative = oversampled).
     """
 
     params: BreakingPointParams
     breaking_points: pd.DataFrame
     non_convergences: dict[int, list[str]]
     plot: matplotlib.figure.Figure
+    sample_deficits: dict[int, dict[str, int]]

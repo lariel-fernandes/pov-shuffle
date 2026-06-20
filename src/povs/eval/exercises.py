@@ -7,7 +7,7 @@ from tqdm import tqdm
 from povs import optim_options_for_dataset, shuffle
 from povs.types import FullOptions, Options
 
-from .metrics import get_ngram_tvd, get_tvd
+from .metrics import get_ngram_tvd, get_ngram_tvd_num_valid, get_sample_deficit, get_tvd, get_tvd_num_valid
 from .utils import time_cpu_op, time_cuda_op
 
 
@@ -104,6 +104,7 @@ class BreakingPointPerDeckSizeResult(NamedTuple):
     options: dict  # deck_size -> FullOptions (after inference)
     positional_breaking_points: dict  # deck_size -> iteration (1-indexed) | None if not converged
     ngram_breaking_points: dict  # deck_size -> {degree -> iteration | None}
+    sample_deficits: dict  # deck_size -> {metric_name -> int}
 
 
 def breaking_point_per_deck_size(
@@ -143,6 +144,7 @@ def breaking_point_per_deck_size(
     options_out = {}
     positional_bps = {}
     ngram_bps = {}
+    deficits_out = {}
 
     for deck_size in tqdm(deck_sizes, desc="Deck sizes"):
         deck = torch.arange(deck_size, dtype=dtype, device=device)
@@ -184,11 +186,19 @@ def breaking_point_per_deck_size(
 
         positional_bps[deck_size] = pos_bp
         ngram_bps[deck_size] = ngram_bp
+        deficits_out[deck_size] = {
+            "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
+            **{
+                f"{n}-gram": get_sample_deficit(num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n))
+                for n in ngram_degrees
+            },
+        }
 
     return BreakingPointPerDeckSizeResult(
         options=options_out,
         positional_breaking_points=positional_bps,
         ngram_breaking_points=ngram_bps,
+        sample_deficits=deficits_out,
     )
 
 
@@ -198,6 +208,7 @@ class TVDPerIterResult(NamedTuple):
     baseline_tvd: float
     ngram_tvds: np.ndarray  # shape (max_iterations, len(ngram_degrees))
     baseline_ngram_tvds: np.ndarray  # shape (len(ngram_degrees),)
+    sample_deficits: dict  # metric_name -> int
 
 
 def tvd_per_iteration(
@@ -207,6 +218,7 @@ def tvd_per_iteration(
     options: Options | None,
     rng: np.random.Generator,
     ngram_degrees: list[int],
+    dtype: torch.dtype,
     device: str,
 ) -> TVDPerIterResult:
     """Measure the Total Variation Distance of the deck shuffling as a function of the number of shuffle iterations.
@@ -217,9 +229,10 @@ def tvd_per_iteration(
     :param options: POV Shuffle algorithm options.
     :param rng: Random number generator for reproducibility.
     :param ngram_degrees: N-gram degrees for which to compute TVD at each iteration.
+    :param dtype: Torch dtype for the deck tensor.
     :param device: Torch device on which to allocate and shuffle the deck tensor.
     """
-    deck = torch.arange(deck_size, device=device)
+    deck = torch.arange(deck_size, dtype=dtype, device=device)
     options = optim_options_for_dataset(deck, options)
 
     tvds = np.zeros(max_iterations, dtype=float)
@@ -241,10 +254,19 @@ def tvd_per_iteration(
     baseline_tvd = get_tvd(samples_np)
     baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n) for n in ngram_degrees])
 
+    sample_deficits = {
+        "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
+        **{
+            f"{n}-gram": get_sample_deficit(num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n))
+            for n in ngram_degrees
+        },
+    }
+
     return TVDPerIterResult(
         tvds=tvds,
         baseline_tvd=baseline_tvd,
         ngram_tvds=ngram_tvds,
         baseline_ngram_tvds=baseline_ngram_tvds,
         options=options,
+        sample_deficits=sample_deficits,
     )
