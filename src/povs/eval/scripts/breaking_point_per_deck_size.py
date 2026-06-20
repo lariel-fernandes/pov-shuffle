@@ -21,14 +21,14 @@ args = parser.parse_args()
 # Parameters
 params = BreakingPointParams(
     seed=42,
-    num_samples=3000,
-    deck_sizes=[100, 200, 500, 1000, 2000, 4000],
+    num_samples=500,
+    deck_sizes=[10_000, 50_000, 100_000, 500_000, 1_000_000],
     ngram_degrees=[2, 3],
     positional_tolerance=0.01,
     ngram_tolerances={},
     default_ngram_tolerance=0.01,
     max_iterations_per_deck_size={},
-    default_max_iterations=10,
+    default_max_iterations=20,
     povs_options_per_deck_size={},
     default_options=Options(
         virtual_block_size=2,
@@ -94,6 +94,7 @@ report = BreakingPointPerDeckSizeReport(
     params=params._replace(povs_options_per_deck_size=result.options),
     breaking_points=breaking_points,
     non_convergences=non_convergences,
+    sample_deficits=result.sample_deficits,
     plot=plot_breaking_point_per_deck_size(
         deck_sizes=params.deck_sizes,
         positional_breaking_points=[result.positional_breaking_points[s] for s in params.deck_sizes],

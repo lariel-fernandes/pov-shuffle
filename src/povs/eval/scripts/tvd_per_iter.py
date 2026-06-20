@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 
 from povs import Options
 from povs.common import get_block_counts
@@ -24,6 +25,7 @@ params = TVDPerIterParams(
         virtual_block_size=2,
         physical_block_size=32,
     ),
+    dtype=torch.int32.__str__().split(".")[-1],
     device="cuda",
 )
 
@@ -36,6 +38,7 @@ result = tvd_per_iteration(
     options=params.povs_options,
     rng=np.random.default_rng(params.seed),
     ngram_degrees=params.ngram_degrees,
+    dtype=getattr(torch, params.dtype),
     device=params.device,
 )
 
@@ -68,6 +71,7 @@ report = TVDPerIterReport(
     num_valid_offsets=len(result.options.offsets),
     ideal_worker_count=(num_vblocks := get_block_counts(deck_size=params.deck_size, **result.options._asdict())[1]),
     host_shuffle_load=(num_vblocks * result.options.virtual_block_size) / params.deck_size,
+    sample_deficits=result.sample_deficits,
 )
 
 # Save the report
