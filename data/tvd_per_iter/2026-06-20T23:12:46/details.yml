@@ -7,32 +7,29 @@ params:
   - 2
   - 3
   povs_options:
-    physical_block_size: 32
     virtual_block_size: 2
+    physical_block_size: 32
     offsets:
     - 0
-    - 2
     - 4
-    - 6
     - 8
-    - 10
     - 12
-    - 14
     - 16
-    - 18
     - 20
-    - 22
     - 24
-    - 26
     - 28
-    - 30
     gpu_thread_block_size: 32
+  dtype: int32
   device: cuda
 worker_data_scan_per_iter: 0.021333333333333333
-num_valid_offsets: 16
+num_valid_offsets: 8
 ideal_worker_count: 16
 host_shuffle_load: 0.03125
-baseline_tvd: 0.22912267049153648
+baseline_tvd: 0.007041992187499999
 baseline_ngram_tvds:
-- 0.0070981994211265905
-- 0.22840564875638505
+- 0.007098199421126589
+- 0.22840564875479552
+sample_deficits:
+  positional: -3070976
+  2-gram: -3070977
+  3-gram: -2026494

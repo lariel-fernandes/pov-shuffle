@@ -52,7 +52,7 @@ Total Variation Distance of a uniform shuffle distribution against the shuffle d
 - Assessed in terms of positional bias and n-gram bias, with the evolution of POVS in the number of iterations.
 - Using a dataset of 1k distinct elements and estimating the distributions from 3k independent shuffling episodes.
 
-[![alt text](./data/tvd_per_iter/2026-06-13T15:33:30/plot.png)](./data/tvd_per_iter/2026-06-13T15:33:30)
+[![alt text](./data/tvd_per_iter/2026-06-20T23:12:46/plot.png)](./data/tvd_per_iter/2026-06-20T23:12:46)
 
 ### Shuffle Time
 

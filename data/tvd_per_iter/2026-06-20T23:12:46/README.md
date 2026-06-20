@@ -27,4 +27,7 @@ TVD per iteration experiment report.
       - `cumulative_exposure`: Fraction of the dataset scanned by each worker up to that iteration.
 
     - `ngram_tvds`: DataFrame with one row per iteration and one column per degree in `ngram_degrees`
+
+    - `sample_deficits`: How many more samples would be needed to observe all valid events at least once,
+      per metric. Keys: ``"positional"``, ``"{n}-gram"``. Zero when exactly covered; negative when oversampled.
     
