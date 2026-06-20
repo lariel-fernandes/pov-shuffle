@@ -1,63 +1,120 @@
-from itertools import permutations
+from math import perm as _perm
 
 import numpy as np
 
 
+def get_tvd_num_valid(deck_size: int) -> int:
+    """Number of valid events for positional TVD: one travel-distance value per deck position."""
+    return deck_size
+
+
+def get_ngram_tvd_num_valid(deck_size: int, n: int) -> int:
+    """Number of valid events for n-gram TVD: ordered selections of n-1 distinct values from {1,...,deck_size-1}."""
+    return _perm(deck_size - 1, n - 1)
+
+
+def get_sample_deficit(num_samples: int, deck_size: int, num_valid: int) -> int:
+    """Signed gap between the event space and the observation budget.
+
+    :returns: ``num_valid - num_samples * deck_size``. Positive means undersampled (more observations
+              would be needed to cover all valid events at least once). Zero means exactly covered.
+              Negative means oversampled (surplus observations).
+    """
+    return num_valid - num_samples * deck_size
+
+
 def get_tvd(samples: np.ndarray) -> float:
-    """Get the mean per-position Total Variation Distance against a uniform distribution.
+    """Mean per-position Total Variation Distance via the travel-distance distribution.
 
-    This is a measure of position bias, checking how likely it is that item `i` goes to position `j` when shuffling,
-    and calculating the difference to a truly uniform shuffle. It is calculated for `j` and then averaged.
-    The result is from 0 (most uniform) to 1 (least uniform).
+    For each element in each sample, the travel distance is ``t = (dest_position - src_value) % deck_size``.
+    In a truly uniform shuffle each travel distance is equally likely, so the reference distribution
+    is uniform over ``{0, ..., deck_size - 1}``.
 
-    :param samples: Array of shape (num_samples, deck_size) containing independent permutations of a deck.
-                    The deck is assumed to contain all and only the monotonically increasing indices 0 to `deck_size-1`.
+    **Adaptive TVD formula**::
+
+        total     = num_samples * deck_size   # total observations
+        num_valid = deck_size                 # number of valid events
+        p_ref     = 1 / min(total, num_valid)
+
+        TVD = 0.5 * [ sum_observed |count/total - p_ref|
+                    + (min(total, num_valid) - num_observed) * p_ref ]
+
+    Since ``total = num_samples * deck_size >= deck_size = num_valid`` for any ``num_samples >= 1``,
+    this metric is always in the oversampled regime and reduces to the standard TVD of the
+    travel-distance distribution against uniform.
+
+    :param samples: Array of shape ``(num_samples, deck_size)`` containing independent permutations.
+                    Values must be the monotonically increasing indices ``0`` to ``deck_size - 1``.
     """
     num_samples, deck_size = samples.shape
+    total = num_samples * deck_size
+    num_valid = deck_size
+    p_ref = 1.0 / min(total, num_valid)
 
-    # Build (deck_size, deck_size) array where [i, j] is how often value i appeared at position j
-    counts = np.apply_along_axis(
-        lambda col: np.bincount(col, minlength=deck_size),
-        axis=0,
-        arr=samples,
-    )
-
-    probs = counts / num_samples
-    baseline_prob = 1 / deck_size
-    return float(0.5 * np.abs(probs - baseline_prob).sum(axis=0).mean())
+    positions = np.tile(np.arange(deck_size), num_samples)
+    travel_distances = (positions - samples.ravel()) % deck_size
+    counts = np.bincount(travel_distances, minlength=deck_size)
+    # bincount fills zeros for unobserved distances, so the sum already covers the full event space
+    return float(0.5 * np.abs(counts / total - p_ref).sum())
 
 
 def get_ngram_tvd(samples: np.ndarray, n: int) -> float:
-    """Get TVD of the n-gram increments distribution against uniform.
+    """TVD of the n-gram relative-difference distribution against uniform.
 
-    This is a measure of sequence bias, checking e.g. if sequences like (1,2,4) and (5,6,8) (increments of 1 and 2) are
-    more likely than (1,3,7) and (5,7,11) (increments of 2 and 4), which should not be the case in a uniform shuffle.
-    The result is from 0 (most uniform) to 1 (least uniform).
+    For each consecutive n-gram ``(v_0, ..., v_{n-1})`` in a sample (with position wrap-around),
+    the event is the tuple of modular distances from ``v_0``:
+    ``((v_1 - v_0) % N, ..., (v_{n-1} - v_0) % N)``.
+    Valid events are all ordered selections of ``n-1`` distinct values from ``{1, ..., N-1}``,
+    giving ``num_valid = P(N-1, n-1)`` equally-likely outcomes under a uniform shuffle.
 
-    For each n-gram (v_0,...,v_{n-1}), the event outcome is defined as the tuple of modular distances from v_0:
-    ((v_1-v_0) % deck_size, ..., (v_{n-1}-v_0) % deck_size).
-    Valid outcomes are all ordered selections of n-1 distinct values from {1,...,deck_size-1}.
+    **Adaptive TVD formula**::
 
-    :param samples: Array of shape (num_samples, deck_size) containing independent permutations of a deck.
-                    The deck is assumed to contain all and only the monotonically increasing indices 0 to `deck_size-1`.
+        total     = num_samples * deck_size
+        num_valid = P(deck_size - 1, n - 1)
+        p_ref     = 1 / min(total, num_valid)
+
+        TVD = 0.5 * [ sum_observed |count/total - p_ref|
+                    + (min(total, num_valid) - num_observed) * p_ref ]
+
+    Observed events are counted sparsely (no enumeration of all valid tuples), so the unobserved
+    contribution is computed analytically. This makes the formula O(total) in time and memory
+    regardless of ``n`` or ``deck_size``.
+
+    **Sampling regimes**:
+
+    - ``n = 2``: ``num_valid = deck_size - 1``, ``total / num_valid ≈ num_samples``. Always
+      oversampled for reasonable ``num_samples``; reduces to standard TVD.
+    - ``n = 3``: ``num_valid ≈ deck_size²``. Undersampled when ``num_samples < deck_size``.
+      In that regime ``p_ref = 1 / total``, so a perfectly uniform shuffler scores TVD ≈ 0
+      (unobserved events are not penalised beyond the sample budget), while a biased shuffler
+      that revisits patterns scores higher because it observes fewer distinct events.
+
+    :param samples: Array of shape ``(num_samples, deck_size)`` containing independent permutations.
     :param n: Degree of the n-gram.
     """
     num_samples, deck_size = samples.shape
-
-    # Extract n-grams for every starting position across all samples (with position wrap-around)
-    col_indices = np.arange(deck_size).reshape(deck_size, 1) + np.arange(n).reshape(1, n)  # (deck_size, n)
-    ngrams = samples.take(col_indices, axis=1, mode="wrap")  # (num_samples, deck_size, n)
-
-    # Modular distances from first element: values in {1,...,deck_size-1} for distinct elements
-    diffs = (ngrams[:, :, 1:] - ngrams[:, :, :1]) % deck_size  # (num_samples, deck_size, n-1)
-    flat_diffs = diffs.reshape(-1, n - 1)  # (num_samples * deck_size, n-1)
-
-    unique_diffs, counts = np.unique(flat_diffs, axis=0, return_counts=True)
     total = num_samples * deck_size
-    obs_probs = {tuple(row): count / total for row, count in zip(unique_diffs, counts)}
+    num_valid = _perm(deck_size - 1, n - 1)
+    p_ref = 1.0 / min(total, num_valid)
 
-    # Valid tuples are all permutations of n-1 distinct values from {1,...,deck_size-1}
-    valid_diffs = list(permutations(range(1, deck_size), n - 1))
-    baseline_prob = 1 / len(valid_diffs)
-    tvd = sum(abs(obs_probs.get(t, 0.0) - baseline_prob) for t in valid_diffs)
-    return float(0.5 * tvd)
+    col_indices = np.arange(deck_size).reshape(deck_size, 1) + np.arange(n).reshape(1, n)
+    ngrams = samples.take(col_indices, axis=1, mode="wrap")  # (num_samples, deck_size, n)
+    diffs = (ngrams[:, :, 1:] - ngrams[:, :, :1]) % deck_size  # (num_samples, deck_size, n-1)
+    del ngrams  # free before encoding keys to keep peak memory bounded
+    flat_diffs = diffs.reshape(-1, n - 1)  # (total, n-1)
+
+    if n == 2:
+        # Diffs are scalars in {1,...,deck_size-1}; bincount fills zeros for unobserved values
+        counts = np.bincount(flat_diffs.ravel(), minlength=deck_size)[1:]
+        # bincount includes zeros, so the full event space is already covered
+        return float(0.5 * np.abs(counts / total - p_ref).sum())
+    else:
+        # Encode each diff tuple as a single int64 key, then count sparsely with np.unique
+        powers = np.array([deck_size**i for i in range(n - 2, -1, -1)], dtype=np.int64)
+        keys = flat_diffs.astype(np.int64) @ powers
+        _, counts = np.unique(keys, return_counts=True)
+        num_observed = len(counts)
+        # np.unique only returns non-zero counts; add unobserved contribution analytically
+        observed = float(0.5 * np.sum(np.abs(counts / total - p_ref)))
+        unobserved = 0.5 * (min(total, num_valid) - num_observed) * p_ref
+        return observed + unobserved

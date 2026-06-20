@@ -31,9 +31,9 @@ _test_get_tvd_cases: list[_TestGetTVD] = [
         samples=np.array([[0, 1, 2], [1, 2, 0], [2, 0, 1]]),
     ),
     _TestGetTVD(
-        desc="half identity half reversal -> 4/9",
+        desc="half identity half reversal -> 1/3 (reversal contributes distance 0,1,2 equally)",
         samples=np.array([[0, 1, 2]] * 3 + [[2, 1, 0]] * 3),
-        expected_tvd=4 / 9,
+        expected_tvd=1 / 3,
     ),
 ]
 
