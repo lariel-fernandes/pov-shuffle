@@ -100,6 +100,98 @@ def shuffle_time_per_deck_size(
     )
 
 
+class BreakingPointPerDeckSizeResult(NamedTuple):
+    options: dict  # deck_size -> FullOptions (after inference)
+    positional_breaking_points: dict  # deck_size -> iteration (1-indexed) | None if not converged
+    ngram_breaking_points: dict  # deck_size -> {degree -> iteration | None}
+
+
+def breaking_point_per_deck_size(
+    deck_sizes: list,
+    num_samples: int,
+    ngram_degrees: list,
+    positional_tolerance: float,
+    ngram_tolerances: dict,
+    default_ngram_tolerance: float,
+    max_iterations_per_deck_size: dict,
+    default_max_iterations: int,
+    povs_options_per_deck_size: dict,
+    default_options,
+    rng: np.random.Generator,
+    dtype,
+    device: str,
+) -> BreakingPointPerDeckSizeResult:
+    """Find the breaking point iteration per deck size for all bias metrics.
+
+    For each deck size, runs POV shuffle iteratively until every bias metric's TVD is within tolerance
+    of the corresponding baseline TVD, or the iteration cap is reached.
+
+    :param deck_sizes: Deck sizes to test.
+    :param num_samples: Number of independent shuffles sampled to estimate the output distribution.
+    :param ngram_degrees: N-gram degrees for which bias convergence is measured.
+    :param positional_tolerance: Convergence threshold for positional TVD.
+    :param ngram_tolerances: Per-degree convergence thresholds, keyed by n-gram degree.
+    :param default_ngram_tolerance: Fallback threshold for degrees absent from ``ngram_tolerances``.
+    :param max_iterations_per_deck_size: Hard iteration cap per deck size.
+    :param default_max_iterations: Fallback cap for deck sizes without a specific entry.
+    :param povs_options_per_deck_size: POV Shuffle options per deck size; ``None`` uses ``default_options``.
+    :param default_options: Default POV Shuffle options.
+    :param rng: Random number generator for reproducibility.
+    :param dtype: Torch dtype for the deck tensor (e.g. ``torch.int32``).
+    :param device: Torch device on which the deck tensor lives and is shuffled.
+    """
+    options_out = {}
+    positional_bps = {}
+    ngram_bps = {}
+
+    for deck_size in tqdm(deck_sizes, desc="Deck sizes"):
+        deck = torch.arange(deck_size, dtype=dtype, device=device)
+        cur_options = optim_options_for_dataset(deck, povs_options_per_deck_size.get(deck_size) or default_options)
+        options_out[deck_size] = cur_options
+        max_iter = max_iterations_per_deck_size.get(deck_size, default_max_iterations)
+
+        # Baseline: measure TVD of np.shuffle
+        baseline_samples = deck.unsqueeze(0).expand(num_samples, -1).clone().cpu().numpy()
+        for s in tqdm(range(num_samples), desc="Baseline samples", leave=False):
+            rng.shuffle(baseline_samples[s])
+        baseline_pos = get_tvd(baseline_samples)
+        baseline_ngram = {n: get_ngram_tvd(baseline_samples, n) for n in ngram_degrees}
+
+        # Track per-metric convergence
+        pos_bp: int | None = None
+        ngram_bp: dict = {n: None for n in ngram_degrees}
+
+        samples = deck.unsqueeze(0).expand(num_samples, -1).clone()
+        for iteration in tqdm(range(1, max_iter + 1), desc="Iterations", leave=False):
+            for s in range(num_samples):
+                shuffle(samples[s], iterations=1, seed=rng, options=cur_options)
+            samples_np = samples.cpu().numpy()
+
+            if pos_bp is None:
+                pov_pos = get_tvd(samples_np)
+                if pov_pos - baseline_pos < positional_tolerance:
+                    pos_bp = iteration
+
+            for n in ngram_degrees:
+                if ngram_bp[n] is None:
+                    tol = ngram_tolerances.get(n, default_ngram_tolerance)
+                    pov_ng = get_ngram_tvd(samples_np, n)
+                    if pov_ng - baseline_ngram[n] < tol:
+                        ngram_bp[n] = iteration
+
+            if pos_bp is not None and all(v is not None for v in ngram_bp.values()):
+                break
+
+        positional_bps[deck_size] = pos_bp
+        ngram_bps[deck_size] = ngram_bp
+
+    return BreakingPointPerDeckSizeResult(
+        options=options_out,
+        positional_breaking_points=positional_bps,
+        ngram_breaking_points=ngram_bps,
+    )
+
+
 class TVDPerIterResult(NamedTuple):
     options: FullOptions  # options after inference for dataset
     tvds: np.ndarray  # shape (max_iterations,)

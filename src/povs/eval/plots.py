@@ -2,6 +2,7 @@ import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 
 
 def plot_time_per_deck_size(
@@ -62,6 +63,61 @@ def plot_time_per_deck_size(
     ax2.set_ylabel("Speedup (×)")
     ax2.legend(loc="upper right")
 
+    fig.tight_layout()
+    return fig
+
+
+def plot_breaking_point_per_deck_size(
+    deck_sizes: list,
+    positional_breaking_points: list,
+    ngram_breaking_points: dict,
+    max_iterations: list,
+) -> matplotlib.figure.Figure:
+    """Plot breaking point (iterations to convergence) vs deck size for each bias metric.
+
+    :param deck_sizes: Deck sizes along the x-axis.
+    :param positional_breaking_points: Convergence iteration per deck size; ``None`` where not converged.
+    :param ngram_breaking_points: Convergence iterations keyed by n-gram degree, then indexed per deck size.
+    :param max_iterations: Resolved iteration cap per deck size; used as the y-position for non-convergence markers.
+    :returns: Matplotlib figure.
+    """
+    fig, ax = plt.subplots()
+
+    did_not_converge_added = False
+
+    def _plot_metric(values, label, color):
+        nonlocal did_not_converge_added
+        valid_x, valid_y = [], []
+        nc_x, nc_y = [], []
+        for x, v, m in zip(deck_sizes, values, max_iterations):
+            if v is not None:
+                valid_x.append(x)
+                valid_y.append(v)
+            else:
+                nc_x.append(x)
+                nc_y.append(m)
+
+        if valid_x:
+            ax.plot(valid_x, valid_y, marker="o", color=color, label=label)
+
+        if nc_x:
+            nc_label = "did not converge" if not did_not_converge_added else None
+            ax.scatter(nc_x, nc_y, marker="^", color=color, zorder=5, label=nc_label)
+            did_not_converge_added = True
+
+    colors = [f"C{i}" for i in range(1 + len(ngram_breaking_points))]
+    _plot_metric(positional_breaking_points, "Positional bias", colors[0])
+    for i, (n, values) in enumerate(sorted(ngram_breaking_points.items())):
+        _plot_metric(values, f"{n}-gram bias", colors[i + 1])
+
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.set_xscale("log", base=10)
+    ax.set_xlabel("Deck Size")
+    ax.set_ylabel("Breaking Point (iterations)")
+    fig.suptitle("Breaking Point per Deck Size")
+    ax.set_title("Iterations until bias converges to baseline", fontsize=9)
+    ax.grid(True)
+    ax.legend()
     fig.tight_layout()
     return fig
 

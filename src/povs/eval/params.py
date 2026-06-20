@@ -3,6 +3,40 @@ from typing import NamedTuple
 from povs import Options
 
 
+class BreakingPointParams(NamedTuple):
+    """Breaking point per deck size experiment parameters.
+
+    - `seed`: RNG seed for reproducibility.
+    - `num_samples`: Number of independent shuffles sampled to estimate the output distribution.
+    - `deck_sizes`: Deck sizes to test, in ascending order.
+    - `ngram_degrees`: N-gram degrees for which bias convergence is measured.
+    - `positional_tolerance`: Convergence threshold for positional TVD: ``tvd_pov - tvd_baseline < tolerance``.
+    - `ngram_tolerances`: Per-degree convergence thresholds, keyed by n-gram degree.
+    - `default_ngram_tolerance`: Fallback threshold for n-gram degrees absent from ``ngram_tolerances``.
+    - `max_iterations_per_deck_size`: Hard iteration cap per deck size, keyed by deck size.
+    - `default_max_iterations`: Fallback cap for deck sizes absent from ``max_iterations_per_deck_size``.
+    - `povs_options_per_deck_size`: POV Shuffle options per deck size; replaced with optimised ``FullOptions``
+      in the report.
+    - `default_options`: Default POV Shuffle options for deck sizes without specific options.
+    - `dtype`: Torch dtype name for the deck tensor (e.g. ``"int32"``, ``"int64"``).
+    - `device`: Torch device on which the deck tensor lives and is shuffled (e.g. ``"cpu"``, ``"cuda"``).
+    """
+
+    seed: int
+    num_samples: int
+    deck_sizes: list[int]
+    ngram_degrees: list[int]
+    positional_tolerance: float
+    ngram_tolerances: dict[int, float]
+    default_ngram_tolerance: float
+    max_iterations_per_deck_size: dict[int, int]
+    default_max_iterations: int
+    povs_options_per_deck_size: dict[int, Options | None]
+    default_options: Options | None
+    dtype: str
+    device: str
+
+
 class TimePerDeckSizeParams(NamedTuple):
     """Time per deck size experiment parameters.
 

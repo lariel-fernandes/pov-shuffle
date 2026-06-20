@@ -46,7 +46,7 @@ python-preference = "only-managed"
 
 [tool.uv.extra-build-variables.pov-shuffle]
 POVS_CUDA_CARTESIAN_INSTANCING = "false"
-POVS_CUDA_INSTANTIATIONS = "2,16,8,float;2,32,8,float;2,16,128,c10::Half"
+POVS_CUDA_INSTANTIATIONS = "2,16,8,float;2,32,8,float;2,16,128,c10::Half;2,32,1,int"
 
 # === Ruff ========================================================================================
 

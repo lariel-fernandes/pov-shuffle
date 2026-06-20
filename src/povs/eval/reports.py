@@ -3,7 +3,7 @@ from typing import NamedTuple
 import matplotlib.figure
 import pandas as pd
 
-from .params import TimePerDeckSizeParams, TVDPerIterParams
+from .params import BreakingPointParams, TimePerDeckSizeParams, TVDPerIterParams
 
 
 class TimePerDeckSizeReport(NamedTuple):
@@ -78,4 +78,28 @@ class TVDPerIterReport(NamedTuple):
     baseline_ngram_tvds: list[float]
     tvds: pd.DataFrame
     ngram_tvds: pd.DataFrame
+    plot: matplotlib.figure.Figure
+
+
+class BreakingPointPerDeckSizeReport(NamedTuple):
+    """Breaking point per deck size experiment report.
+
+    **Results & Metrics**:
+
+    - `plot`: Matplotlib figure showing the breaking point (iterations to convergence) vs deck size,
+              one line per bias metric. Missing data points indicate non-convergence within the iteration limit.
+
+    - `breaking_points`: DataFrame with one row per deck size. Columns:
+      - `deck_size`: Number of elements in the deck.
+      - `positional`: Iteration at which positional bias converged; ``NaN`` if not converged.
+      - `{n}-gram`: Iteration at which n-gram bias of degree ``n`` converged; ``NaN`` if not converged.
+      - `overall`: Latest convergence iteration across all metrics (only set when all metrics converged).
+
+    - `non_convergences`: Metrics that did not converge within the iteration limit, keyed by deck size.
+      Each value is a list of metric names (e.g. ``["positional", "3-gram"]``).
+    """
+
+    params: BreakingPointParams
+    breaking_points: pd.DataFrame
+    non_convergences: dict[int, list[str]]
     plot: matplotlib.figure.Figure

@@ -9,7 +9,7 @@ testing:
 
 evaluation:
 - [ ] experiment: compare the resulting TVD and other biases against a standard local block shuffle
-- [ ] experiment: tvd breaking point by dataset size
+- [x] experiment: tvd breaking point by dataset size
 - [ ] experiment: sequential bias by iter with lstm evaluator
 
 ## Project Structure
