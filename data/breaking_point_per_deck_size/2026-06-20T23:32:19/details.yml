@@ -1,0 +1,112 @@
+params:
+  seed: 42
+  num_samples: 500
+  deck_sizes:
+  - 10000
+  - 50000
+  - 100000
+  - 500000
+  - 1000000
+  ngram_degrees:
+  - 2
+  - 3
+  positional_tolerance: 0.01
+  ngram_tolerances: {}
+  default_ngram_tolerance: 0.01
+  max_iterations_per_deck_size: {}
+  default_max_iterations: 20
+  povs_options_per_deck_size:
+    10000:
+      virtual_block_size: 2
+      physical_block_size: 32
+      offsets:
+      - 0
+      - 4
+      - 8
+      - 12
+      - 16
+      - 20
+      - 24
+      - 28
+      gpu_thread_block_size: 32
+    50000:
+      virtual_block_size: 2
+      physical_block_size: 32
+      offsets:
+      - 0
+      - 4
+      - 8
+      - 12
+      - 16
+      - 20
+      - 24
+      - 28
+      gpu_thread_block_size: 32
+    100000:
+      virtual_block_size: 2
+      physical_block_size: 32
+      offsets:
+      - 0
+      - 4
+      - 8
+      - 12
+      - 16
+      - 20
+      - 24
+      - 28
+      gpu_thread_block_size: 32
+    500000:
+      virtual_block_size: 2
+      physical_block_size: 32
+      offsets:
+      - 0
+      - 4
+      - 8
+      - 12
+      - 16
+      - 20
+      - 24
+      - 28
+      gpu_thread_block_size: 32
+    1000000:
+      virtual_block_size: 2
+      physical_block_size: 32
+      offsets:
+      - 0
+      - 4
+      - 8
+      - 12
+      - 16
+      - 20
+      - 24
+      - 28
+      gpu_thread_block_size: 32
+  default_options:
+    virtual_block_size: 2
+    physical_block_size: 32
+    offsets: null
+    gpu_thread_block_size: null
+  dtype: int32
+  device: cuda
+non_convergences: {}
+sample_deficits:
+  10000:
+    positional: -4990000
+    2-gram: -4990001
+    3-gram: 94970002
+  50000:
+    positional: -24950000
+    2-gram: -24950001
+    3-gram: 2474850002
+  100000:
+    positional: -49900000
+    2-gram: -49900001
+    3-gram: 9949700002
+  500000:
+    positional: -249500000
+    2-gram: -249500001
+    3-gram: 249748500002
+  1000000:
+    positional: -499000000
+    2-gram: -499000001
+    3-gram: 999497000002

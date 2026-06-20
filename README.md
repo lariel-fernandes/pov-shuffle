@@ -54,6 +54,12 @@ Total Variation Distance of a uniform shuffle distribution against the shuffle d
 
 [![alt text](./data/tvd_per_iter/2026-06-20T23:12:46/plot.png)](./data/tvd_per_iter/2026-06-20T23:12:46)
 
+### Breaking Point
+
+Minimum number of POV shuffle iterations required for each bias metric to converge within tolerance of the np.shuffle baseline, across deck sizes from 10k to 1M elements.
+
+[![alt text](./data/breaking_point_per_deck_size/2026-06-20T23:32:19/plot.png)](./data/breaking_point_per_deck_size/2026-06-20T23:32:19)
+
 ### Shuffle Time
 
 Shuffle time per deck size with 4-iterations POVS on instances of shape `(128 x float16)`, using the NVIDIA Ada Lovelace architecture.
