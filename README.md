@@ -1,4 +1,4 @@
-# POV Shuffle
+# POV-Shuffle
 _**P**arallel **O**ffset **V**irtual-block Shuffle_
 
 A fully parallel algorithm for efficiently shuffling large datasets without copy,
@@ -9,20 +9,18 @@ while sufficiently approximating a uniform shuffle within few iterations.
 ```python
 import povs
 
-# Optional: Optimize algorithm options once for the dataset, to avoid
-# overhead when calling `povs.shuffle` multiple times on the same dataset.
-options = povs.optim_options_for_dataset(
-    dataset,  # A numpy array or PyTorch tensor
-)
+# A numpy array or PyTorch tensor on CPU or CUDA device
+dataset = ...
 
 # Shuffle the dataset in place
 povs.shuffle(
-    dataset,  # A numpy array or PyTorch tensor
+    dataset,  # A numpy array or PyTorch tensor on CPU or CUDA device
     iterations=3,
-    options=options,
+    options=povs.Options(virtual_block_size=2),  # Optional: specify full or partial algorithm options.
+                                                 # Unspecified parameters are chosen automatically.
 )
 ```
-- See `help(povs.shuffle)` for more details.
+- For more details see `help(povs.shuffle)` and `help(povs.optim_options_for_dataset)`.
 
 ## Installation
 ```bash
@@ -46,28 +44,30 @@ POVS_CUDA_INSTANCE_SIZES = "32,96,128"  # Add support for these instance sizes, 
 
 ## Performance
 
-### TVD
+### Shuffle Time
 
-Total Variation Distance of a uniform shuffle distribution against the shuffle distributions obtained from POV and baseline algorithms (`np.shuffle`).
-- Assessed in terms of positional bias and n-gram bias, with the evolution of POVS in the number of iterations.
-- Using a dataset of 1k distinct elements and estimating the distributions from 3k independent shuffling episodes.
+Shuffle time per deck size with 4-iterations POV-shuffle on instances of shape `(128 x float16)`, using the NVIDIA Ada Lovelace architecture.
+
+For a fair comparison with the algorithm, which offers close-to-uniform, zero-copy, in-place shuffling,
+the baseline used here is `numpy.shuffle`, which is also a uniform shuffle (Fisher-Yates), performed in-place and without copy.
+
+[![alt text](./data/time_per_deck_size/2026-06-13T20:54:09/plot.png)](./data/time_per_deck_size/2026-06-13T20:54:09)
+
+### Bias Convergence
+
+[Positional TVD bias](./docs/GLOSSARY.md#positional-tvd) and [N-gram TVD biases](./docs/GLOSSARY.md#n-gram-tvd)
+measured for the baseline `numpy.shuffle` and for increasing iterations of the POV-shuffle,
+on a dataset of 1k distinct instances and estimating the event distributions from the observation
+of 3k independent shuffling episodes.
 
 [![alt text](./data/tvd_per_iter/2026-06-20T23:12:46/plot.png)](./data/tvd_per_iter/2026-06-20T23:12:46)
 
 ### Breaking Point
 
-Minimum number of POV shuffle iterations required for each bias metric to converge within tolerance of the np.shuffle baseline, across deck sizes from 10k to 1M elements.
+Minimum number of POV-shuffle iterations required for each bias metric to converge to the observed value
+of the respective metric for the baseline `numpy.shuffle`, as a function of the deck size.
 
 [![alt text](./data/breaking_point_per_deck_size/2026-06-20T23:32:19/plot.png)](./data/breaking_point_per_deck_size/2026-06-20T23:32:19)
-
-### Shuffle Time
-
-Shuffle time per deck size with 4-iterations POVS on instances of shape `(128 x float16)`, using the NVIDIA Ada Lovelace architecture.
-
-For a fair comparison with the algorithm, which offers close-to-uniform, zero-copy, in-place shuffling,
-the used baseline is `numpy.shuffle`, which is also a uniform shuffle (Fisher-Yates), performed in-place and without copy.
-
-[![alt text](./data/time_per_deck_size/2026-06-13T20:54:09/plot.png)](./data/time_per_deck_size/2026-06-13T20:54:09)
 
 ## Algorithm
 

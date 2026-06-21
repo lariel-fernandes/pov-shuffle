@@ -1,6 +1,7 @@
 
 ## Tasks
 ux:
+- [ ] consider making dtypes an enum in setup.py, with translation to C types and at constants
 - [ ] add flag to restrict optim to supported params only
 - [ ] expose a checker for supported params using build params, taking into account custom template instancing and cartesian flag
 
