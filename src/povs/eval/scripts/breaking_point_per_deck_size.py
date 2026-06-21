@@ -92,7 +92,9 @@ report = BreakingPointPerDeckSizeReport(
         ngram_breaking_points={
             n: [result.ngram_breaking_points[s][n] for s in params.deck_sizes] for n in params.ngram_degrees
         },
-        max_iterations=[params.max_iterations_per_deck_size.get(s, params.default_max_iterations) for s in params.deck_sizes],
+        max_iterations=[
+            params.max_iterations_per_deck_size.get(s, params.default_max_iterations) for s in params.deck_sizes
+        ],
     ),
 )
 

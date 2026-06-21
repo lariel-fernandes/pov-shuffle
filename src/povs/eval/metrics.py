@@ -103,10 +103,7 @@ def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
     p_ref = 1.0 / min(total, num_valid)
 
     step = skip + 1
-    col_indices = (
-        np.arange(deck_size).reshape(deck_size, 1)
-        + np.arange(0, n * step, step).reshape(1, n)
-    )
+    col_indices = np.arange(deck_size).reshape(deck_size, 1) + np.arange(0, n * step, step).reshape(1, n)
     ngrams = samples.take(col_indices, axis=1, mode="wrap")  # (num_samples, deck_size, n)
     rtds = _relative_travel_distances(ngrams, deck_size, skip)  # (num_samples, deck_size, n-1)
     del ngrams  # free before encoding keys to keep peak memory bounded
