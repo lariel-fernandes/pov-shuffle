@@ -58,14 +58,17 @@ def get_tvd(samples: np.ndarray) -> float:
     return float(0.5 * np.abs(counts / total - p_ref).sum())
 
 
-def get_ngram_tvd(samples: np.ndarray, n: int) -> float:
-    """TVD of the n-gram relative-difference distribution against uniform.
+def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
+    """TVD of the n-gram relative-travel-distance distribution against uniform.
 
-    For each consecutive n-gram ``(v_0, ..., v_{n-1})`` in a sample (with position wrap-around),
-    the event is the tuple of modular distances from ``v_0``:
-    ``((v_1 - v_0) % N, ..., (v_{n-1} - v_0) % N)``.
-    Valid events are all ordered selections of ``n-1`` distinct values from ``{1, ..., N-1}``,
-    giving ``num_valid = P(N-1, n-1)`` equally-likely outcomes under a uniform shuffle.
+    For each n-gram of observed values ``(v_0, ..., v_{n-1})`` at positions spaced ``skip+1`` apart
+    (with wrap-around), the event is the tuple of relative travel distances
+    ``(rtd_1, ..., rtd_{n-1})`` computed by :func:`_relative_travel_distances`.
+
+    Valid events are all tuples where the underlying value differences
+    ``(v_k - v_0) mod N`` form an ordered selection of ``n-1`` distinct non-zero values from
+    ``{1, ..., N-1}``, giving ``num_valid = P(N-1, n-1)`` equally-likely outcomes under a uniform
+    shuffle. This count is the same for all values of ``skip``.
 
     **Adaptive TVD formula**::
 
@@ -78,7 +81,7 @@ def get_ngram_tvd(samples: np.ndarray, n: int) -> float:
 
     Observed events are counted sparsely (no enumeration of all valid tuples), so the unobserved
     contribution is computed analytically. This makes the formula O(total) in time and memory
-    regardless of ``n`` or ``deck_size``.
+    regardless of ``n``, ``skip``, or ``deck_size``.
 
     **Sampling regimes**:
 
@@ -91,30 +94,66 @@ def get_ngram_tvd(samples: np.ndarray, n: int) -> float:
 
     :param samples: Array of shape ``(num_samples, deck_size)`` containing independent permutations.
     :param n: Degree of the n-gram.
+    :param skip: Number of positions skipped between consecutive n-gram elements.
+                 ``0`` (default) means adjacent elements; ``1`` means every other element, etc.
     """
     num_samples, deck_size = samples.shape
     total = num_samples * deck_size
     num_valid = _perm(deck_size - 1, n - 1)
     p_ref = 1.0 / min(total, num_valid)
 
-    col_indices = np.arange(deck_size).reshape(deck_size, 1) + np.arange(n).reshape(1, n)
+    step = skip + 1
+    col_indices = (
+        np.arange(deck_size).reshape(deck_size, 1)
+        + np.arange(0, n * step, step).reshape(1, n)
+    )
     ngrams = samples.take(col_indices, axis=1, mode="wrap")  # (num_samples, deck_size, n)
-    diffs = (ngrams[:, :, 1:] - ngrams[:, :, :1]) % deck_size  # (num_samples, deck_size, n-1)
+    rtds = _relative_travel_distances(ngrams, deck_size, skip)  # (num_samples, deck_size, n-1)
     del ngrams  # free before encoding keys to keep peak memory bounded
-    flat_diffs = diffs.reshape(-1, n - 1)  # (total, n-1)
+    flat_rtds = rtds.reshape(-1, n - 1)  # (total, n-1)
 
     if n == 2:
-        # Diffs are scalars in {1,...,deck_size-1}; bincount fills zeros for unobserved values
-        counts = np.bincount(flat_diffs.ravel(), minlength=deck_size)[1:]
-        # bincount includes zeros, so the full event space is already covered
+        # RTDs are scalars in {0,...,deck_size-1} \ {(skip+1) % deck_size}
+        # bincount covers the full range including the one impossible bin (count=0 there)
+        excluded = (skip + 1) % deck_size
+        counts = np.delete(np.bincount(flat_rtds.ravel(), minlength=deck_size), excluded)
         return float(0.5 * np.abs(counts / total - p_ref).sum())
     else:
-        # Encode each diff tuple as a single int64 key, then count sparsely with np.unique
+        # Encode each RTD tuple as a single int64 key, then count sparsely with np.unique
         powers = np.array([deck_size**i for i in range(n - 2, -1, -1)], dtype=np.int64)
-        keys = flat_diffs.astype(np.int64) @ powers
+        keys = flat_rtds @ powers
         _, counts = np.unique(keys, return_counts=True)
         num_observed = len(counts)
         # np.unique only returns non-zero counts; add unobserved contribution analytically
         observed = float(0.5 * np.sum(np.abs(counts / total - p_ref)))
         unobserved = 0.5 * (min(total, num_valid) - num_observed) * p_ref
         return observed + unobserved
+
+
+def _relative_travel_distances(ngrams: np.ndarray, deck_size: int, skip: int = 0) -> np.ndarray:
+    """Relative travel distance of each non-anchor element in a batch of n-grams.
+
+    For an n-gram ``(v_0, v_1, ..., v_{n-1})`` observed at positions spaced ``skip+1`` apart,
+    the relative travel distance of ``v_k`` with respect to the anchor ``v_0`` is how much their
+    positional gap changed compared to the original (pre-shuffle) separation:
+
+        rtd_k = (k * (skip + 1) - (v_k - v_0))  mod  deck_size
+
+    A value of 0 means the two elements maintained exactly the same relative order and distance as
+    before the shuffle. Negative change (they got closer) and positive change (they drifted further)
+    are both represented modulo ``deck_size``.
+
+    Under a uniform shuffle, ``rtd_k`` is uniformly distributed over the ``deck_size - 1`` values
+    ``{0, ..., deck_size-1} \\ {k*(skip+1) mod deck_size}``, for any ``skip``.
+
+    :param ngrams: Array of shape ``(..., n)`` containing observed values.
+    :param deck_size: Number of elements in the deck (used as modulus).
+    :param skip: Number of positions skipped between consecutive n-gram observations.
+                 ``0`` (default) means adjacent; ``1`` means every other element, etc.
+    :returns: Array of shape ``(..., n-1)``.
+    """
+    n = ngrams.shape[-1]
+    step = skip + 1
+    expected = step * np.arange(1, n, dtype=np.int64)
+    diffs = ngrams[..., 1:].astype(np.int64) - ngrams[..., :1].astype(np.int64)
+    return (expected - diffs) % deck_size
