@@ -6,21 +6,9 @@ from typing import Any, Type
 import yaml as _yaml
 
 
-class _Dumper(_yaml.Dumper):
-    """Patch of `yaml.Dumper`.
-
-    Additional features:
-       - Serializes NamedTuple as dict
-    """
-
-    def represent_data(self, data):
-        if isinstance(data, tuple) and callable(f := getattr(data, "_asdict", None)):
-            data = f()
-
-        if isinstance(data, Exception):
-            data = "".join(traceback.format_exception(type(data), data, data.__traceback__))
-
-        return super().represent_data(data)
+def ngram_metric_name(n: int, skip: int) -> str:
+    """Formatted metric name for an n-gram or skip-gram bias metric."""
+    return f"{n}-gram (skip {skip})" if skip > 0 else f"{n}-gram"
 
 
 def time_cuda_op(op: Callable, num_warmup: int, num_runs: int) -> list[float]:
@@ -66,6 +54,23 @@ def time_cpu_op(op: Callable, num_warmup: int, num_runs: int) -> list[float]:
         times_ms.append((time.perf_counter() - t0) * 1000)
 
     return times_ms
+
+
+class _Dumper(_yaml.Dumper):
+    """Patch of `yaml.Dumper`.
+
+    Additional features:
+       - Serializes NamedTuple as dict
+    """
+
+    def represent_data(self, data):
+        if isinstance(data, tuple) and callable(f := getattr(data, "_asdict", None)):
+            data = f()
+
+        if isinstance(data, Exception):
+            data = "".join(traceback.format_exception(type(data), data, data.__traceback__))
+
+        return super().represent_data(data)
 
 
 class yaml:

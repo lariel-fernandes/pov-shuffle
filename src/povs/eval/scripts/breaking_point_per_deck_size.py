@@ -13,6 +13,7 @@ from ..io import save_breaking_point_report
 from ..params import BreakingPointParams
 from ..plots import plot_breaking_point_per_deck_size
 from ..reports import BreakingPointPerDeckSizeReport
+from ..utils import ngram_metric_name
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
@@ -24,6 +25,7 @@ params = BreakingPointParams(
     num_samples=500,
     deck_sizes=[10_000, 50_000, 100_000, 500_000, 1_000_000],
     ngram_degrees=[2, 3],
+    ngram_skips=[0, 0],
     positional_tolerance=0.01,
     ngram_tolerances={},
     default_ngram_tolerance=0.01,
@@ -38,12 +40,15 @@ params = BreakingPointParams(
     device=args.device,
 )
 
+ngram_pairs = list(zip(params.ngram_degrees, params.ngram_skips))
+
 # Run experiment
 start_time = datetime.now()
 result = breaking_point_per_deck_size(
     deck_sizes=params.deck_sizes,
     num_samples=params.num_samples,
     ngram_degrees=params.ngram_degrees,
+    ngram_skips=params.ngram_skips,
     positional_tolerance=params.positional_tolerance,
     ngram_tolerances=params.ngram_tolerances,
     default_ngram_tolerance=params.default_ngram_tolerance,
@@ -62,19 +67,19 @@ for deck_size in params.deck_sizes:
     nc = []
     if result.positional_breaking_points[deck_size] is None:
         nc.append("positional")
-    for n in params.ngram_degrees:
-        if result.ngram_breaking_points[deck_size][n] is None:
-            nc.append(f"{n}-gram")
+    for n, skip in ngram_pairs:
+        if result.ngram_breaking_points[deck_size][(n, skip)] is None:
+            nc.append(ngram_metric_name(n, skip))
     if nc:
         non_convergences[deck_size] = nc
 
 # Build breaking_points DataFrame
-metric_cols = ["positional"] + [f"{n}-gram" for n in params.ngram_degrees]
+metric_cols = ["positional"] + [ngram_metric_name(n, skip) for n, skip in ngram_pairs]
 rows = []
 for deck_size in params.deck_sizes:
     row = {"deck_size": deck_size, "positional": result.positional_breaking_points[deck_size]}
-    for n in params.ngram_degrees:
-        row[f"{n}-gram"] = result.ngram_breaking_points[deck_size][n]
+    for n, skip in ngram_pairs:
+        row[ngram_metric_name(n, skip)] = result.ngram_breaking_points[deck_size][(n, skip)]
     converged = [row[k] for k in metric_cols if row[k] is not None]
     row["overall"] = max(converged) if len(converged) == len(metric_cols) else None
     rows.append(row)
@@ -90,7 +95,8 @@ report = BreakingPointPerDeckSizeReport(
         deck_sizes=params.deck_sizes,
         positional_breaking_points=[result.positional_breaking_points[s] for s in params.deck_sizes],
         ngram_breaking_points={
-            n: [result.ngram_breaking_points[s][n] for s in params.deck_sizes] for n in params.ngram_degrees
+            ngram_metric_name(n, skip): [result.ngram_breaking_points[s][(n, skip)] for s in params.deck_sizes]
+            for n, skip in ngram_pairs
         },
         max_iterations=[
             params.max_iterations_per_deck_size.get(s, params.default_max_iterations) for s in params.deck_sizes

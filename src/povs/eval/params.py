@@ -10,6 +10,7 @@ class BreakingPointParams(NamedTuple):
     - `num_samples`: Number of independent shuffles sampled to estimate the output distribution.
     - `deck_sizes`: Deck sizes to test, in ascending order.
     - `ngram_degrees`: N-gram degrees for which bias convergence is measured.
+    - `ngram_skips`: Number of positions skipped between n-gram elements, one per entry in `ngram_degrees`.
     - `positional_tolerance`: Convergence threshold for positional TVD: ``tvd_pov - tvd_baseline < tolerance``.
     - `ngram_tolerances`: Per-degree convergence thresholds, keyed by n-gram degree.
     - `default_ngram_tolerance`: Fallback threshold for n-gram degrees absent from ``ngram_tolerances``.
@@ -26,6 +27,7 @@ class BreakingPointParams(NamedTuple):
     num_samples: int
     deck_sizes: list[int]
     ngram_degrees: list[int]
+    ngram_skips: list[int]
     positional_tolerance: float
     ngram_tolerances: dict[int, float]
     default_ngram_tolerance: float
@@ -74,6 +76,8 @@ class TVDPerIterParams(NamedTuple):
     - `max_iterations`: Number of shuffle iterations tested (from 1 to this value, inclusive).
     - `povs_options`: POV Shuffle algorithm options used in this run.
     - `ngram_degrees`: N-gram degrees for which TVD was measured.
+    - `ngram_skips`: Number of positions skipped between n-gram elements, one per entry in `ngram_degrees`.
+                     ``0`` means adjacent elements (standard n-gram); positive values produce skip-grams.
     - `dtype`: Torch dtype name for the deck tensor (e.g. ``"int32"``, ``"int64"``).
     - `device`: Torch device on which the deck tensor lives and is shuffled (e.g. ``"cpu"``, ``"cuda"``).
     """
@@ -83,6 +87,7 @@ class TVDPerIterParams(NamedTuple):
     deck_size: int
     max_iterations: int
     ngram_degrees: list[int]
+    ngram_skips: list[int]
     povs_options: Options | None
     dtype: str
     device: str

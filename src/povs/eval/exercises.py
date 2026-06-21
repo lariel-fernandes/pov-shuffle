@@ -8,7 +8,7 @@ from povs import optim_options_for_dataset, shuffle
 from povs.types import FullOptions, Options
 
 from .metrics import get_ngram_tvd, get_ngram_tvd_num_valid, get_sample_deficit, get_tvd, get_tvd_num_valid
-from .utils import time_cpu_op, time_cuda_op
+from .utils import ngram_metric_name, time_cpu_op, time_cuda_op
 
 
 class ShuffleTimePerDeckSizeResult(NamedTuple):
@@ -103,7 +103,7 @@ def shuffle_time_per_deck_size(
 class BreakingPointPerDeckSizeResult(NamedTuple):
     options: dict  # deck_size -> FullOptions (after inference)
     positional_breaking_points: dict  # deck_size -> iteration (1-indexed) | None if not converged
-    ngram_breaking_points: dict  # deck_size -> {degree -> iteration | None}
+    ngram_breaking_points: dict  # deck_size -> {(n, skip) -> iteration | None}
     sample_deficits: dict  # deck_size -> {metric_name -> int}
 
 
@@ -111,6 +111,7 @@ def breaking_point_per_deck_size(
     deck_sizes: list,
     num_samples: int,
     ngram_degrees: list,
+    ngram_skips: list,
     positional_tolerance: float,
     ngram_tolerances: dict,
     default_ngram_tolerance: float,
@@ -130,6 +131,7 @@ def breaking_point_per_deck_size(
     :param deck_sizes: Deck sizes to test.
     :param num_samples: Number of independent shuffles sampled to estimate the output distribution.
     :param ngram_degrees: N-gram degrees for which bias convergence is measured.
+    :param ngram_skips: Skip values paired with ``ngram_degrees``; ``0`` means adjacent elements.
     :param positional_tolerance: Convergence threshold for positional TVD.
     :param ngram_tolerances: Per-degree convergence thresholds, keyed by n-gram degree.
     :param default_ngram_tolerance: Fallback threshold for degrees absent from ``ngram_tolerances``.
@@ -141,6 +143,7 @@ def breaking_point_per_deck_size(
     :param dtype: Torch dtype for the deck tensor (e.g. ``torch.int32``).
     :param device: Torch device on which the deck tensor lives and is shuffled.
     """
+    ngram_pairs = list(zip(ngram_degrees, ngram_skips))
     options_out = {}
     positional_bps = {}
     ngram_bps = {}
@@ -157,11 +160,11 @@ def breaking_point_per_deck_size(
         for s in tqdm(range(num_samples), desc="Baseline samples", leave=False):
             rng.shuffle(baseline_samples[s])
         baseline_pos = get_tvd(baseline_samples)
-        baseline_ngram = {n: get_ngram_tvd(baseline_samples, n) for n in ngram_degrees}
+        baseline_ngram = {(n, skip): get_ngram_tvd(baseline_samples, n, skip=skip) for n, skip in ngram_pairs}
 
         # Track per-metric convergence
         pos_bp: int | None = None
-        ngram_bp: dict = {n: None for n in ngram_degrees}
+        ngram_bp: dict = {(n, skip): None for n, skip in ngram_pairs}
 
         samples = deck.unsqueeze(0).expand(num_samples, -1).clone()
         for iteration in tqdm(range(1, max_iter + 1), desc="Iterations", leave=False):
@@ -174,12 +177,12 @@ def breaking_point_per_deck_size(
                 if pov_pos - baseline_pos < positional_tolerance:
                     pos_bp = iteration
 
-            for n in ngram_degrees:
-                if ngram_bp[n] is None:
+            for n, skip in ngram_pairs:
+                if ngram_bp[(n, skip)] is None:
                     tol = ngram_tolerances.get(n, default_ngram_tolerance)
-                    pov_ng = get_ngram_tvd(samples_np, n)
-                    if pov_ng - baseline_ngram[n] < tol:
-                        ngram_bp[n] = iteration
+                    pov_ng = get_ngram_tvd(samples_np, n, skip=skip)
+                    if pov_ng - baseline_ngram[(n, skip)] < tol:
+                        ngram_bp[(n, skip)] = iteration
 
             if pos_bp is not None and all(v is not None for v in ngram_bp.values()):
                 break
@@ -189,8 +192,10 @@ def breaking_point_per_deck_size(
         deficits_out[deck_size] = {
             "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
             **{
-                f"{n}-gram": get_sample_deficit(num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n))
-                for n in ngram_degrees
+                ngram_metric_name(n, skip): get_sample_deficit(
+                    num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n)
+                )
+                for n, skip in ngram_pairs
             },
         }
 
@@ -218,6 +223,7 @@ def tvd_per_iteration(
     options: Options | None,
     rng: np.random.Generator,
     ngram_degrees: list[int],
+    ngram_skips: list[int],
     dtype: torch.dtype,
     device: str,
 ) -> TVDPerIterResult:
@@ -229,14 +235,16 @@ def tvd_per_iteration(
     :param options: POV Shuffle algorithm options.
     :param rng: Random number generator for reproducibility.
     :param ngram_degrees: N-gram degrees for which to compute TVD at each iteration.
+    :param ngram_skips: Skip values paired with ``ngram_degrees``; ``0`` means adjacent elements.
     :param dtype: Torch dtype for the deck tensor.
     :param device: Torch device on which to allocate and shuffle the deck tensor.
     """
+    ngram_pairs = list(zip(ngram_degrees, ngram_skips))
     deck = torch.arange(deck_size, dtype=dtype, device=device)
     options = optim_options_for_dataset(deck, options)
 
     tvds = np.zeros(max_iterations, dtype=float)
-    ngram_tvds = np.zeros((max_iterations, len(ngram_degrees)), dtype=float)
+    ngram_tvds = np.zeros((max_iterations, len(ngram_pairs)), dtype=float)
 
     # Initialize samples and determine the TVD of the POV Shuffle after each iteration
     samples = deck.unsqueeze(0).expand(num_samples, -1).clone()
@@ -245,20 +253,22 @@ def tvd_per_iteration(
             shuffle(samples[sample_id], iterations=1, seed=rng, options=options)
         samples_np = samples.cpu().numpy()
         tvds[i] = get_tvd(samples_np)
-        ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n) for n in ngram_degrees])
+        ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
 
     # Re-initialize samples and determine the TVD of a perfect shuffle (baseline)
     samples_np = deck.unsqueeze(0).expand(num_samples, -1).clone().cpu().numpy()
     for sample_id in tqdm(range(num_samples), desc="Samples (baseline)"):
         rng.shuffle(samples_np[sample_id])
     baseline_tvd = get_tvd(samples_np)
-    baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n) for n in ngram_degrees])
+    baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
 
     sample_deficits = {
         "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
         **{
-            f"{n}-gram": get_sample_deficit(num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n))
-            for n in ngram_degrees
+            ngram_metric_name(n, skip): get_sample_deficit(
+                num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n)
+            )
+            for n, skip in ngram_pairs
         },
     }
 

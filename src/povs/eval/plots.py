@@ -77,7 +77,8 @@ def plot_breaking_point_per_deck_size(
 
     :param deck_sizes: Deck sizes along the x-axis.
     :param positional_breaking_points: Convergence iteration per deck size; ``None`` where not converged.
-    :param ngram_breaking_points: Convergence iterations keyed by n-gram degree, then indexed per deck size.
+    :param ngram_breaking_points: Convergence iterations keyed by formatted metric name (e.g. ``"2-gram"``,
+        ``"3-gram (skip 2)"``), values are lists indexed per deck size.
     :param max_iterations: Resolved iteration cap per deck size; used as the y-position for non-convergence markers.
     :returns: Matplotlib figure.
     """
@@ -107,8 +108,8 @@ def plot_breaking_point_per_deck_size(
 
     colors = [f"C{i}" for i in range(1 + len(ngram_breaking_points))]
     _plot_metric(positional_breaking_points, "Positional bias", colors[0])
-    for i, (n, values) in enumerate(sorted(ngram_breaking_points.items())):
-        _plot_metric(values, f"{n}-gram bias", colors[i + 1])
+    for i, (name, values) in enumerate(ngram_breaking_points.items()):
+        _plot_metric(values, f"{name} bias", colors[i + 1])
 
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_xscale("log", base=10)
@@ -127,7 +128,7 @@ def plot_tvd_per_iteration(
     baseline: float,
     worker_data_scan_per_iter: float,
     ngram_tvds: np.ndarray,
-    ngram_degrees: list[int],
+    ngram_names: list[str],
     baseline_ngram_tvds: np.ndarray,
 ) -> matplotlib.figure.Figure:
     """Plot Total Variation Distance as a function of shuffle iterations.
@@ -135,9 +136,10 @@ def plot_tvd_per_iteration(
     :param tvds: 1-D array of positional TVD values, one per iteration (index 0 = iteration 1).
     :param baseline: Observed positional TVD for the baseline shuffle on the same dataset size.
     :param worker_data_scan_per_iter: Percentage of data seen by each worker per iteration.
-    :param ngram_tvds: Array of shape (max_iterations, len(ngram_degrees)) with n-gram TVD per iteration.
-    :param ngram_degrees: N-gram degrees corresponding to columns in ngram_tvds.
-    :param baseline_ngram_tvds: Observed n-gram TVD for the baseline shuffle, one value per degree in ngram_degrees.
+    :param ngram_tvds: Array of shape (max_iterations, len(ngram_names)) with n-gram TVD per iteration.
+    :param ngram_names: Formatted metric names (e.g. ``"2-gram"``, ``"3-gram (skip 2)"``) corresponding
+        to columns in ``ngram_tvds``.
+    :param baseline_ngram_tvds: Observed n-gram TVD for the baseline shuffle, one value per entry in ngram_names.
     :returns: Matplotlib figure.
     """
     fig, ax = plt.subplots()
@@ -145,9 +147,9 @@ def plot_tvd_per_iteration(
 
     ax.plot(iterations, tvds, marker="o", color="C0", label="Positional bias")
     ax.axhline(y=baseline, color="C0", linestyle="--")
-    for i, n in enumerate(ngram_degrees):
+    for i, name in enumerate(ngram_names):
         color = f"C{i + 1}"
-        ax.plot(iterations, ngram_tvds[:, i], marker="o", color=color, label=f"{n}-gram bias")
+        ax.plot(iterations, ngram_tvds[:, i], marker="o", color=color, label=f"{name} bias")
         ax.axhline(y=baseline_ngram_tvds[i], color=color, linestyle="--")
 
     ax.set_xlabel("Iterations")

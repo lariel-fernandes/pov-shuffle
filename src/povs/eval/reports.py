@@ -57,19 +57,20 @@ class TVDPerIterReport(NamedTuple):
                       In theory this should be zero, but if the sample size is too small and the deck size too large,
                       the statistic may not converge to zero.
 
-    - `baseline_ngram_tvds`: Observed N-gram TVD of the baseline shuffle, one value per degree in `ngram_degrees`.
-                             Same considerations as `baseline_tvd` apply, with the degree of the ngram distribution
-                             increasing the amount of samples required for convergence.
+    - `baseline_ngram_tvds`: Observed N-gram TVD of the baseline shuffle, one value per (degree, skip) pair in
+                             `ngram_degrees` / `ngram_skips`. Same considerations as `baseline_tvd` apply.
 
     - `tvds`: DataFrame with one row per iteration. Columns:
       - `iteration`: Iteration number (1-indexed).
       - `tvd`: Total Variation Distance of the POV Shuffle at that iteration.
       - `cumulative_exposure`: Fraction of the dataset scanned by each worker up to that iteration.
 
-    - `ngram_tvds`: DataFrame with one row per iteration and one column per degree in `ngram_degrees`
+    - `ngram_tvds`: DataFrame with one row per iteration and one column per (degree, skip) pair, named
+      ``"{n}-gram"`` or ``"{n}-gram (skip {s})"`` when skip > 0.
 
     - `sample_deficits`: How many more samples would be needed to observe all valid events at least once,
-      per metric. Keys: ``"positional"``, ``"{n}-gram"``. Zero when exactly covered; negative when oversampled.
+      per metric. Keys: ``"positional"``, ``"{n}-gram"`` / ``"{n}-gram (skip {s})"``.
+      Zero when exactly covered; negative when oversampled.
     """
 
     params: TVDPerIterParams
@@ -96,11 +97,11 @@ class BreakingPointPerDeckSizeReport(NamedTuple):
     - `breaking_points`: DataFrame with one row per deck size. Columns:
       - `deck_size`: Number of elements in the deck.
       - `positional`: Iteration at which positional bias converged; ``NaN`` if not converged.
-      - `{n}-gram`: Iteration at which n-gram bias of degree ``n`` converged; ``NaN`` if not converged.
+      - ``"{n}-gram"`` / ``"{n}-gram (skip {s})"``: Iteration at which n-gram bias converged; ``NaN`` if not.
       - `overall`: Latest convergence iteration across all metrics (only set when all metrics converged).
 
     - `non_convergences`: Metrics that did not converge within the iteration limit, keyed by deck size.
-      Each value is a list of metric names (e.g. ``["positional", "3-gram"]``).
+      Each value is a list of metric names (e.g. ``["positional", "3-gram (skip 2)"]``).
 
     - `sample_deficits`: Sample deficit per deck size per metric. Outer key: deck size. Inner key:
       metric name (``"positional"``, ``"{n}-gram"``). Value: ``num_valid - num_samples * deck_size``
