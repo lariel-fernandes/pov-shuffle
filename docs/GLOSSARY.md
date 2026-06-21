@@ -13,11 +13,21 @@ Example: For a rank-3 `float32` tensor of shape `(I, M, N)`, there are `I` insta
 ### (Absolute) Travel Distance and Relative Travel Distance
 After shuffling a dataset, the travel distance of each instance is how far it ended up from its initial position.
 
-For a tuple of instances, their relative travel distance is how far apart they became, relative to how far apart they used to be.
-- Example 1: If `1` and `2` end up next to each other, the relative travel distance of the bigram `[1, 2]` is `0` (i.e. they are just as far as they used to be).
-- Example 2: If we observe `[1, _, _, 10]`, the relative travel distance of the skip-gram `[1, 10]` is `-6` (i.e. they are `6` positions _closer_ than they used to be).
-- Example 3: The relative travel distance tuple of the 3-gram `[10, 12, 1]` is `(X, Y)`, where `X = (distance_now - distance_before) = 1 - 2 = -1` and `Y` follows the same formula,
-  but depends on the dataset size (`distance_before` requires going from `10` to `1` by moving the cursor to the right until it wraps around the dataset).
+For an n-gram or skip-gram of instances, the **signed** relative travel distance of the k-th element with respect to the anchor (first element) is:
+
+```
+rtd_k = (v_k - v_0) - k * step
+```
+
+where `v_k - v_0` is the original signed positional gap and `k * step` is their current separation. Positive means they got closer; negative means they drifted further apart. Values range approximately from `-deck_size` to `+deck_size`.
+
+- **Example 1:** Bigram `[1, 2]` ends up adjacent: `rtd = (2 - 1) - 1 = 0` (unchanged relative distance).
+- **Example 2:** Skip-gram `[0, 10]` with step `3` observed after shuffling: `rtd = (10 - 0) - 3 = 7` (7 positions closer).
+- **Example 3:** 3-gram `[10, 15, 3]` at adjacent positions: `rtd_1 = (15 - 10) - 1 = 4`, `rtd_2 = (3 - 10) - 2 = -9` (15 got 4 closer to 10; 3 drifted 9 further from 10).
+
+> **Note:** The [N-gram TVD metric](#n-gram-tvd) applies `% deck_size` to each signed RTD before counting.
+> This collapses the signed range into an event space of `deck_size - 1` equivalence classes that are equally likely
+> under a uniform shuffle, which is required for the reference distribution to be uniform.
 
 ## Algorithm Internals
 
@@ -44,7 +54,7 @@ distribution for any event space produced by an unbiased shuffle.
 
 In undersampled experiments, where the number of event observations is smaller than the event space itself, we use an adaptive TVD formula:
 - The reference (i.e. uniform) probability of any event is not `1 / event_space_size`, but `1 / num_observations`
-- The contribution of unobserved events to the TVD is capped by the number of observations
+- The contribution of unobserved events to the TVD is capped by the observation budget
   (intuition: if a die of 100 sides is thrown 10 times, at most 10 sides can show up, not 100).
 
 ### Positional TVD

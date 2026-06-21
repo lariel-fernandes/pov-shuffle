@@ -63,7 +63,9 @@ def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
 
     For each n-gram of observed values ``(v_0, ..., v_{n-1})`` at positions spaced ``skip+1`` apart
     (with wrap-around), the event is the tuple of relative travel distances
-    ``(rtd_1, ..., rtd_{n-1})`` computed by :func:`_relative_travel_distances`.
+    ``(rtd_1, ..., rtd_{n-1})`` from :func:`_relative_travel_distances`, reduced modulo
+    ``deck_size`` for counting. The modular reduction collapses the signed RTD range into
+    ``deck_size - 1`` equally-likely equivalence classes under a uniform shuffle.
 
     Valid events are all tuples where the underlying value differences
     ``(v_k - v_0) mod N`` form an ordered selection of ``n-1`` distinct non-zero values from
@@ -105,14 +107,16 @@ def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
     step = skip + 1
     col_indices = np.arange(deck_size).reshape(deck_size, 1) + np.arange(0, n * step, step).reshape(1, n)
     ngrams = samples.take(col_indices, axis=1, mode="wrap")  # (num_samples, deck_size, n)
-    rtds = _relative_travel_distances(ngrams, deck_size, skip)  # (num_samples, deck_size, n-1)
+    rtds = _relative_travel_distances(ngrams, skip)  # (num_samples, deck_size, n-1), signed
     del ngrams  # free before encoding keys to keep peak memory bounded
-    flat_rtds = rtds.reshape(-1, n - 1)  # (total, n-1)
+    # Convert signed RTDs to modular form for uniform counting: applying % deck_size collapses
+    # the signed range into deck_size - 1 equally-likely equivalence classes under a uniform shuffle.
+    flat_rtds = (rtds % deck_size).reshape(-1, n - 1).astype(np.int64)  # (total, n-1)
 
     if n == 2:
-        # RTDs are scalars in {0,...,deck_size-1} \ {(skip+1) % deck_size}
+        # Modular RTDs are scalars in {0,...,deck_size-1} \ {(deck_size - skip - 1) % deck_size}
         # bincount covers the full range including the one impossible bin (count=0 there)
-        excluded = (skip + 1) % deck_size
+        excluded = (deck_size - skip - 1) % deck_size
         counts = np.delete(np.bincount(flat_rtds.ravel(), minlength=deck_size), excluded)
         return float(0.5 * np.abs(counts / total - p_ref).sum())
     else:
@@ -127,24 +131,22 @@ def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
         return observed + unobserved
 
 
-def _relative_travel_distances(ngrams: np.ndarray, deck_size: int, skip: int = 0) -> np.ndarray:
-    """Relative travel distance of each non-anchor element in a batch of n-grams.
+def _relative_travel_distances(ngrams: np.ndarray, skip: int = 0) -> np.ndarray:
+    """Signed relative travel distance of each non-anchor element in a batch of n-grams.
 
     For an n-gram ``(v_0, v_1, ..., v_{n-1})`` observed at positions spaced ``skip+1`` apart,
-    the relative travel distance of ``v_k`` with respect to the anchor ``v_0`` is how much their
-    positional gap changed compared to the original (pre-shuffle) separation:
+    the relative travel distance of ``v_k`` is how much closer it became to the anchor ``v_0``
+    as a result of shuffling:
 
-        rtd_k = (k * (skip + 1) - (v_k - v_0))  mod  deck_size
+        rtd_k = (v_k - v_0) - k * (skip + 1)
 
-    A value of 0 means the two elements maintained exactly the same relative order and distance as
-    before the shuffle. Negative change (they got closer) and positive change (they drifted further)
-    are both represented modulo ``deck_size``.
+    ``v_k - v_0`` is the original signed positional gap; ``k * (skip + 1)`` is the current
+    separation. Positive values mean the pair got closer; negative means they drifted further apart.
 
-    Under a uniform shuffle, ``rtd_k`` is uniformly distributed over the ``deck_size - 1`` values
-    ``{0, ..., deck_size-1} \\ {k*(skip+1) mod deck_size}``, for any ``skip``.
+    Under a uniform shuffle, ``rtd_k`` takes ``deck_size - 1`` equally-likely values in the
+    approximate range ``[-deck_size, +deck_size]``.
 
     :param ngrams: Array of shape ``(..., n)`` containing observed values.
-    :param deck_size: Number of elements in the deck (used as modulus).
     :param skip: Number of positions skipped between consecutive n-gram observations.
                  ``0`` (default) means adjacent; ``1`` means every other element, etc.
     :returns: Array of shape ``(..., n-1)``.
@@ -153,4 +155,4 @@ def _relative_travel_distances(ngrams: np.ndarray, deck_size: int, skip: int = 0
     step = skip + 1
     expected = step * np.arange(1, n, dtype=np.int64)
     diffs = ngrams[..., 1:].astype(np.int64) - ngrams[..., :1].astype(np.int64)
-    return (expected - diffs) % deck_size
+    return diffs - expected
