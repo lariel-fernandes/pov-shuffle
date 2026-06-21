@@ -56,9 +56,6 @@ result = breaking_point_per_deck_size(
     device=params.device,
 )
 
-# Resolved max iterations per deck size
-max_iterations = [params.max_iterations_per_deck_size.get(s, params.default_max_iterations) for s in params.deck_sizes]
-
 # Non-convergence tracking
 non_convergences: dict[int, list[str]] = {}
 for deck_size in params.deck_sizes:
@@ -75,19 +72,13 @@ for deck_size in params.deck_sizes:
 metric_cols = ["positional"] + [f"{n}-gram" for n in params.ngram_degrees]
 rows = []
 for deck_size in params.deck_sizes:
-    row: dict = {"deck_size": deck_size}
-    row["positional"] = result.positional_breaking_points[deck_size]
+    row = {"deck_size": deck_size, "positional": result.positional_breaking_points[deck_size]}
     for n in params.ngram_degrees:
         row[f"{n}-gram"] = result.ngram_breaking_points[deck_size][n]
     converged = [row[k] for k in metric_cols if row[k] is not None]
     row["overall"] = max(converged) if len(converged) == len(metric_cols) else None
     rows.append(row)
 breaking_points = pd.DataFrame(rows)
-
-# Per-degree lists for the plot (one entry per deck size, None if not converged)
-ngram_breaking_points_by_degree = {
-    n: [result.ngram_breaking_points[s][n] for s in params.deck_sizes] for n in params.ngram_degrees
-}
 
 # Put together the report
 report = BreakingPointPerDeckSizeReport(
@@ -98,8 +89,10 @@ report = BreakingPointPerDeckSizeReport(
     plot=plot_breaking_point_per_deck_size(
         deck_sizes=params.deck_sizes,
         positional_breaking_points=[result.positional_breaking_points[s] for s in params.deck_sizes],
-        ngram_breaking_points=ngram_breaking_points_by_degree,
-        max_iterations=max_iterations,
+        ngram_breaking_points={
+            n: [result.ngram_breaking_points[s][n] for s in params.deck_sizes] for n in params.ngram_degrees
+        },
+        max_iterations=[params.max_iterations_per_deck_size.get(s, params.default_max_iterations) for s in params.deck_sizes],
     ),
 )
 
