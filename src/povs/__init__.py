@@ -23,13 +23,15 @@ def shuffle(
     options: Options | None = None,
     seed: int | t.Generator | np.random.Generator | None = None,
 ) -> None:
-    """POV Shuffle - Implementation routing for numpy (cpu) vs torch (cuda).
+    """POV Shuffle - Implementation routing for numpy (cpu) and torch (cpu, cuda).
 
     :param data: Data tensor or array to shuffle in place along the axis 0.
     :param iterations: Number of shuffling iterations to perform.
-    :param options: POV Shuffle algorithm options. If options are partially specified,
-                    the missing downstream parameters are chosen using `optim_options_for_dataset`.
-                    Specified downstream parameters are ignored if at least one upstream parameter is unspecified.
+    :param options: POV Shuffle algorithm options. If options are unspecified or partially specified,
+                    the missing downstream parameters are chosen using `povs.optim_options_for_dataset`.
+                    Specified downstream parameters are ignored if at least one upstream parameter is unspecified
+                    (e.g. specifying `povs.Options.physial_block_size` [downstream] without
+                    `povs.Options.virtual_block_size` [upstream] is the same as not specifying it at all)
     :param seed: Random seed or random number generator state.
     """
 
@@ -59,7 +61,15 @@ def optim_options_for_dataset(
     data: np.ndarray | t.Tensor,
     partial_options: Options | None = None,
 ) -> FullOptions:
-    """Choose POV Shuffle options for dataset."""
+    """Choose POV Shuffle algorithm options for dataset.
+
+    :param data: Data tensor or array to shuffle in place along the axis 0.
+    :param partial_options: Starting point for the POV Shuffle algorithm options.
+                            Specified downstream parameters are ignored if at least one upstream parameter is unspecified
+                            (e.g. specifying `povs.Options.physial_block_size` [downstream] without
+                            `povs.Options.virtual_block_size` [upstream] is the same as not specifying it at all)
+    :returns: Recommended POV Shuffle algorithm options for the specified dataset.
+    """
 
     # Use numpy implementation for CPU tensors
     if isinstance(data, t.Tensor) and data.get_device() == -1:
