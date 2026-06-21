@@ -47,7 +47,7 @@ def get_tvd(samples: np.ndarray) -> float:
                     Values must be the monotonically increasing indices ``0`` to ``deck_size - 1``.
     """
     num_samples, deck_size = samples.shape
-    total = num_samples * deck_size
+    total = int(num_samples) * deck_size
     num_valid = deck_size
     p_ref = 1.0 / min(total, num_valid)
 
