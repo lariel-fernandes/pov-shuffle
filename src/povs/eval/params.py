@@ -2,6 +2,8 @@ from typing import NamedTuple
 
 from povs import Options
 
+from .lstm import LSTMSettings
+
 
 class BreakingPointParams(NamedTuple):
     """Breaking point per deck size experiment parameters.
@@ -91,3 +93,4 @@ class TVDPerIterParams(NamedTuple):
     povs_options: Options | None
     dtype: str
     device: str
+    lstm_settings: LSTMSettings | None = None

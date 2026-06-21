@@ -43,6 +43,7 @@ result = tvd_per_iteration(
     ngram_skips=params.ngram_skips,
     dtype=getattr(torch, params.dtype),
     device=params.device,
+    lstm_settings=params.lstm_settings,
 )
 
 ngram_names = [ngram_metric_name(n, skip) for n, skip in zip(params.ngram_degrees, params.ngram_skips)]
@@ -77,6 +78,16 @@ report = TVDPerIterReport(
     ideal_worker_count=(num_vblocks := get_block_counts(deck_size=params.deck_size, **result.options._asdict())[1]),
     host_shuffle_load=(num_vblocks * result.options.virtual_block_size) / params.deck_size,
     sample_deficits=result.sample_deficits,
+    lstm_predictabilities=(
+        pd.DataFrame(result.lstm_predictabilities, columns=ngram_names).assign(
+            iteration=range(1, params.max_iterations + 1)
+        )
+        if result.lstm_predictabilities is not None
+        else None
+    ),
+    baseline_lstm_predictabilities=(
+        result.baseline_lstm_predictabilities.tolist() if result.baseline_lstm_predictabilities is not None else None
+    ),
 )
 
 # Save the report

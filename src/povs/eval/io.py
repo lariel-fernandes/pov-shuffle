@@ -37,6 +37,7 @@ def save_tvd_per_iter_report(path: Path, report: TVDPerIterReport) -> None:
     plot = details.pop("plot")
     tvds = details.pop("tvds")
     ngram_tvds = details.pop("ngram_tvds")
+    lstm_predictabilities = details.pop("lstm_predictabilities")
 
     (path / "details.yml").write_text(yaml.dump(details))
 
@@ -45,5 +46,8 @@ def save_tvd_per_iter_report(path: Path, report: TVDPerIterReport) -> None:
     tvds.to_csv(path / "tvds.csv", index=False)
 
     ngram_tvds.to_csv(path / "ngram_tvds.csv", index=False)
+
+    if lstm_predictabilities is not None:
+        lstm_predictabilities.to_csv(path / "lstm_predictabilities.csv", index=False)
 
     plot.savefig(path / "plot.png")

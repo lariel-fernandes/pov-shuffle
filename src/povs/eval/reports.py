@@ -84,6 +84,8 @@ class TVDPerIterReport(NamedTuple):
     ngram_tvds: pd.DataFrame
     plot: matplotlib.figure.Figure
     sample_deficits: dict[str, int]
+    lstm_predictabilities: pd.DataFrame | None = None
+    baseline_lstm_predictabilities: list[float] | None = None
 
 
 class BreakingPointPerDeckSizeReport(NamedTuple):

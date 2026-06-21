@@ -7,6 +7,7 @@ from tqdm import tqdm
 from povs import optim_options_for_dataset, shuffle
 from povs.types import FullOptions, Options
 
+from .lstm import LSTMSettings, lstm_predictability
 from .metrics import get_ngram_tvd, get_ngram_tvd_num_valid, get_sample_deficit, get_tvd, get_tvd_num_valid
 from .utils import ngram_metric_name, time_cpu_op, time_cuda_op
 
@@ -214,6 +215,8 @@ class TVDPerIterResult(NamedTuple):
     ngram_tvds: np.ndarray  # shape (max_iterations, len(ngram_degrees))
     baseline_ngram_tvds: np.ndarray  # shape (len(ngram_degrees),)
     sample_deficits: dict  # metric_name -> int
+    lstm_predictabilities: np.ndarray | None = None  # shape (max_iterations, len(ngram_degrees))
+    baseline_lstm_predictabilities: np.ndarray | None = None  # shape (len(ngram_degrees),)
 
 
 def tvd_per_iteration(
@@ -226,6 +229,7 @@ def tvd_per_iteration(
     ngram_skips: list[int],
     dtype: torch.dtype,
     device: str,
+    lstm_settings: LSTMSettings | None = None,
 ) -> TVDPerIterResult:
     """Measure the Total Variation Distance of the deck shuffling as a function of the number of shuffle iterations.
 
@@ -238,6 +242,7 @@ def tvd_per_iteration(
     :param ngram_skips: Skip values paired with ``ngram_degrees``; ``0`` means adjacent elements.
     :param dtype: Torch dtype for the deck tensor.
     :param device: Torch device on which to allocate and shuffle the deck tensor.
+    :param lstm_settings: If provided, trains an LSTM per n-gram degree to measure RTD predictability.
     """
     ngram_pairs = list(zip(ngram_degrees, ngram_skips))
     deck = torch.arange(deck_size, dtype=dtype, device=device)
@@ -245,6 +250,7 @@ def tvd_per_iteration(
 
     tvds = np.zeros(max_iterations, dtype=float)
     ngram_tvds = np.zeros((max_iterations, len(ngram_pairs)), dtype=float)
+    lstm_pred = np.zeros((max_iterations, len(ngram_degrees))) if lstm_settings is not None else None
 
     # Initialize samples and determine the TVD of the POV Shuffle after each iteration
     samples = deck.unsqueeze(0).expand(num_samples, -1).clone()
@@ -254,6 +260,8 @@ def tvd_per_iteration(
         samples_np = samples.cpu().numpy()
         tvds[i] = get_tvd(samples_np)
         ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
+        if lstm_settings is not None:
+            lstm_pred[i, :] = [lstm_predictability(samples_np, deck_size, n, lstm_settings, device) for n in ngram_degrees]
 
     # Re-initialize samples and determine the TVD of a perfect shuffle (baseline)
     samples_np = deck.unsqueeze(0).expand(num_samples, -1).clone().cpu().numpy()
@@ -261,6 +269,11 @@ def tvd_per_iteration(
         rng.shuffle(samples_np[sample_id])
     baseline_tvd = get_tvd(samples_np)
     baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
+    baseline_lstm = (
+        np.array([lstm_predictability(samples_np, deck_size, n, lstm_settings, device) for n in ngram_degrees])
+        if lstm_settings is not None
+        else None
+    )
 
     sample_deficits = {
         "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
@@ -279,4 +292,6 @@ def tvd_per_iteration(
         baseline_ngram_tvds=baseline_ngram_tvds,
         options=options,
         sample_deficits=sample_deficits,
+        lstm_predictabilities=lstm_pred,
+        baseline_lstm_predictabilities=baseline_lstm,
     )
