@@ -3,8 +3,9 @@ import json
 import os
 import textwrap
 import typing
+import warnings
 from pathlib import Path
-from typing import NamedTuple, ForwardRef
+from typing import ForwardRef, NamedTuple
 
 import cutlass_library
 import torch.utils.cpp_extension
@@ -163,11 +164,15 @@ def get_generated_files(opts: EnvVars) -> list[tuple[str, str]]:
     ]
 
 
-assert cutlass_library.__file__
-assert (cuda_home := find_cuda_home())
-
 build_options = load_env_vars()
-os.environ["CUDA_HOME"] = torch.utils.cpp_extension.CUDA_HOME = cuda_home
+
+if not cutlass_library.__file__:
+    warnings.warn("CUTLASS lib not found")
+
+if (cuda_home := find_cuda_home()) is None:
+    warnings.warn("CUDA home not found")
+else:
+    os.environ["CUDA_HOME"] = torch.utils.cpp_extension.CUDA_HOME = cuda_home
 
 
 class BuildExtension(torch.utils.cpp_extension.BuildExtension):
