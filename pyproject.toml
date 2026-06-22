@@ -35,6 +35,9 @@ dependencies = [
     "torch            ~=2.12",
 ]
 
+[project.urls]
+Repository = "https://github.com/lariel-fernandes/pov-shuffle"
+
 [dependency-groups]
 dev = [
     "matplotlib       >=3.10.9",
