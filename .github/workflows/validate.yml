@@ -8,6 +8,8 @@ on:
 
 env:
   UV_CACHE_DIR: ~/.cache/uv
+  CUDA_KEYRING_VERSION: 1.1-1
+  CUDA_TOOLKIT_VERSION: 13-0
 
 jobs:
   validate:
@@ -26,10 +28,13 @@ jobs:
           key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
           path: ${{ env.UV_CACHE_DIR }}
 
+      - name: Cache CUDA apt packages
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          key: apt-cuda-${{ env.CUDA_TOOLKIT_VERSION }}
+          path: /var/cache/apt/archives
+
       - name: Install CUDA toolkit
-        env:
-          CUDA_KEYRING_VERSION: 1.1-1
-          CUDA_TOOLKIT_VERSION: 13-0
         run: |
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_${CUDA_KEYRING_VERSION}_all.deb
           sudo dpkg -i cuda-keyring_${CUDA_KEYRING_VERSION}_all.deb
