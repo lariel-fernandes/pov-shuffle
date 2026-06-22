@@ -1,3 +1,6 @@
+import json
+import logging
+from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
@@ -10,6 +13,8 @@ from povs.types import FullOptions, Options
 from .lstm import LSTMSettings, lstm_predictability
 from .metrics import get_ngram_tvd, get_ngram_tvd_num_valid, get_sample_deficit, get_tvd, get_tvd_num_valid
 from .utils import ngram_metric_name, time_cpu_op, time_cuda_op
+
+_logger = logging.getLogger(__name__)
 
 
 class ShuffleTimePerDeckSizeResult(NamedTuple):
@@ -106,6 +111,7 @@ class BreakingPointPerDeckSizeResult(NamedTuple):
     positional_breaking_points: dict  # deck_size -> iteration (1-indexed) | None if not converged
     ngram_breaking_points: dict  # deck_size -> {(n, skip) -> iteration | None}
     sample_deficits: dict  # deck_size -> {metric_name -> int}
+    lstm_breaking_points: dict | None = None  # deck_size -> iteration | None; set only when lstm_settings provided
 
 
 def breaking_point_per_deck_size(
@@ -123,6 +129,9 @@ def breaking_point_per_deck_size(
     rng: np.random.Generator,
     dtype,
     device: str,
+    lstm_settings: LSTMSettings | None = None,
+    lstm_tolerance: float = 0.01,
+    checkpoint_dir: Path | None = None,
 ) -> BreakingPointPerDeckSizeResult:
     """Find the breaking point iteration per deck size for all bias metrics.
 
@@ -143,53 +152,146 @@ def breaking_point_per_deck_size(
     :param rng: Random number generator for reproducibility.
     :param dtype: Torch dtype for the deck tensor (e.g. ``torch.int32``).
     :param device: Torch device on which the deck tensor lives and is shuffled.
+    :param lstm_settings: If provided, trains an LSTM at each iteration and tracks its convergence to
+        the baseline predictability using ``lstm_tolerance`` as the threshold.
+    :param lstm_tolerance: Convergence threshold for LSTM predictability.
+    :param checkpoint_dir: If provided, episodes and metrics are persisted under
+        ``<checkpoint_dir>/<deck_size>/baseline/`` and ``<checkpoint_dir>/<deck_size>/pov_<k>/``.
+        Existing checkpoints are loaded instead of recomputed, enabling crash recovery.
     """
     ngram_pairs = list(zip(ngram_degrees, ngram_skips))
     options_out = {}
     positional_bps = {}
     ngram_bps = {}
     deficits_out = {}
+    lstm_bps: dict | None = {} if lstm_settings is not None else None
 
     for deck_size in tqdm(deck_sizes, desc="Deck sizes"):
         deck = torch.arange(deck_size, dtype=dtype, device=device)
         cur_options = optim_options_for_dataset(deck, povs_options_per_deck_size.get(deck_size) or default_options)
         options_out[deck_size] = cur_options
         max_iter = max_iterations_per_deck_size.get(deck_size, default_max_iterations)
+        ds_ckpt = checkpoint_dir / str(deck_size) if checkpoint_dir is not None else None
+        _logger.info("deck=%d: starting (max_iterations=%d)", deck_size, max_iter)
 
-        # Baseline: measure TVD of np.shuffle
-        baseline_samples = deck.unsqueeze(0).expand(num_samples, -1).clone().cpu().numpy()
-        for s in tqdm(range(num_samples), desc="Baseline samples", leave=False):
-            rng.shuffle(baseline_samples[s])
-        baseline_pos = get_tvd(baseline_samples)
-        baseline_ngram = {(n, skip): get_ngram_tvd(baseline_samples, n, skip=skip) for n, skip in ngram_pairs}
+        # --- Baseline ---
+        baseline_samples = _ckpt_load_episodes(ds_ckpt, "baseline")
+        if baseline_samples is None:
+            _logger.info("deck=%d baseline: generating %d episodes", deck_size, num_samples)
+            baseline_samples = deck.unsqueeze(0).expand(num_samples, -1).clone().cpu().numpy()
+            for s in tqdm(range(num_samples), desc="Baseline samples", leave=False):
+                rng.shuffle(baseline_samples[s])
+            _ckpt_save_episodes(ds_ckpt, "baseline", baseline_samples)
+        else:
+            _logger.info("deck=%d baseline: loaded episodes from checkpoint", deck_size)
 
-        # Track per-metric convergence
+        baseline_metrics = _ckpt_load_metrics(ds_ckpt, "baseline") or {}
+
+        if "positional" not in baseline_metrics:
+            _logger.info("deck=%d baseline: computing positional TVD", deck_size)
+            baseline_metrics["positional"] = get_tvd(baseline_samples)
+            _ckpt_save_metrics(ds_ckpt, "baseline", baseline_metrics)
+        else:
+            _logger.info("deck=%d baseline: positional TVD loaded from checkpoint", deck_size)
+
+        for n, skip in ngram_pairs:
+            key = ngram_metric_name(n, skip)
+            if key not in baseline_metrics:
+                _logger.info("deck=%d baseline: computing %s TVD", deck_size, key)
+                baseline_metrics[key] = get_ngram_tvd(baseline_samples, n, skip=skip)
+                _ckpt_save_metrics(ds_ckpt, "baseline", baseline_metrics)
+            else:
+                _logger.info("deck=%d baseline: %s TVD loaded from checkpoint", deck_size, key)
+
+        if lstm_settings is not None and "lstm_predictability" not in baseline_metrics:
+            _logger.info("deck=%d baseline: computing LSTM predictability", deck_size)
+            baseline_metrics["lstm_predictability"] = lstm_predictability(
+                baseline_samples, deck_size, lstm_settings, device
+            )
+            _ckpt_save_metrics(ds_ckpt, "baseline", baseline_metrics)
+        elif lstm_settings is not None:
+            _logger.info("deck=%d baseline: LSTM predictability loaded from checkpoint", deck_size)
+
+        baseline_pos = baseline_metrics["positional"]
+        baseline_ngram = {(n, skip): baseline_metrics[ngram_metric_name(n, skip)] for n, skip in ngram_pairs}
+        baseline_lstm_val = baseline_metrics.get("lstm_predictability")
+
+        # --- Iterations ---
         pos_bp: int | None = None
         ngram_bp: dict = {(n, skip): None for n, skip in ngram_pairs}
+        lstm_bp: int | None = None
 
         samples = deck.unsqueeze(0).expand(num_samples, -1).clone()
         for iteration in tqdm(range(1, max_iter + 1), desc="Iterations", leave=False):
-            for s in range(num_samples):
-                shuffle(samples[s], iterations=1, seed=rng, options=cur_options)
-            samples_np = samples.cpu().numpy()
+            ckpt_name = f"pov_{iteration}"
+            episodes = _ckpt_load_episodes(ds_ckpt, ckpt_name)
+            if episodes is not None:
+                _logger.info("deck=%d iter=%d: loaded episodes from checkpoint", deck_size, iteration)
+                samples = torch.tensor(episodes, dtype=dtype, device=device)
+                samples_np = episodes
+            else:
+                _logger.info("deck=%d iter=%d: shuffling %d episodes", deck_size, iteration, num_samples)
+                for s in range(num_samples):
+                    shuffle(samples[s], iterations=1, seed=rng, options=cur_options)
+                samples_np = samples.cpu().numpy()
+                _ckpt_save_episodes(ds_ckpt, ckpt_name, samples_np)
 
-            if pos_bp is None:
-                pov_pos = get_tvd(samples_np)
-                if pov_pos - baseline_pos < positional_tolerance:
-                    pos_bp = iteration
+            iter_metrics = _ckpt_load_metrics(ds_ckpt, ckpt_name) or {}
+
+            if pos_bp is None and "positional" not in iter_metrics:
+                _logger.info("deck=%d iter=%d: computing positional TVD", deck_size, iteration)
+                iter_metrics["positional"] = get_tvd(samples_np)
+                _ckpt_save_metrics(ds_ckpt, ckpt_name, iter_metrics)
+            elif pos_bp is None:
+                _logger.info("deck=%d iter=%d: positional TVD loaded from checkpoint", deck_size, iteration)
+            if (
+                pos_bp is None
+                and "positional" in iter_metrics
+                and iter_metrics["positional"] - baseline_pos < positional_tolerance
+            ):
+                pos_bp = iteration
+                _logger.info("deck=%d iter=%d: positional breaking point", deck_size, iteration)
 
             for n, skip in ngram_pairs:
-                if ngram_bp[(n, skip)] is None:
-                    tol = ngram_tolerances.get(n, default_ngram_tolerance)
-                    pov_ng = get_ngram_tvd(samples_np, n, skip=skip)
-                    if pov_ng - baseline_ngram[(n, skip)] < tol:
-                        ngram_bp[(n, skip)] = iteration
+                key = ngram_metric_name(n, skip)
+                if ngram_bp[(n, skip)] is None and key not in iter_metrics:
+                    _logger.info("deck=%d iter=%d: computing %s TVD", deck_size, iteration, key)
+                    iter_metrics[key] = get_ngram_tvd(samples_np, n, skip=skip)
+                    _ckpt_save_metrics(ds_ckpt, ckpt_name, iter_metrics)
+                elif ngram_bp[(n, skip)] is None:
+                    _logger.info("deck=%d iter=%d: %s TVD loaded from checkpoint", deck_size, iteration, key)
+                if (
+                    ngram_bp[(n, skip)] is None
+                    and key in iter_metrics
+                    and iter_metrics[key] - baseline_ngram[(n, skip)] < ngram_tolerances.get(n, default_ngram_tolerance)
+                ):
+                    ngram_bp[(n, skip)] = iteration
+                    _logger.info("deck=%d iter=%d: %s breaking point", deck_size, iteration, key)
 
-            if pos_bp is not None and all(v is not None for v in ngram_bp.values()):
+            if lstm_settings is not None and lstm_bp is None and "lstm_predictability" not in iter_metrics:
+                _logger.info("deck=%d iter=%d: computing LSTM predictability", deck_size, iteration)
+                iter_metrics["lstm_predictability"] = lstm_predictability(samples_np, deck_size, lstm_settings, device)
+                _ckpt_save_metrics(ds_ckpt, ckpt_name, iter_metrics)
+            elif lstm_settings is not None and lstm_bp is None:
+                _logger.info("deck=%d iter=%d: LSTM predictability loaded from checkpoint", deck_size, iteration)
+            if (
+                lstm_settings is not None
+                and lstm_bp is None
+                and "lstm_predictability" in iter_metrics
+                and iter_metrics["lstm_predictability"] - baseline_lstm_val < lstm_tolerance
+            ):
+                lstm_bp = iteration
+                _logger.info("deck=%d iter=%d: LSTM breaking point", deck_size, iteration)
+
+            tvd_converged = pos_bp is not None and all(v is not None for v in ngram_bp.values())
+            lstm_converged = lstm_settings is None or lstm_bp is not None
+            if tvd_converged and lstm_converged:
                 break
 
         positional_bps[deck_size] = pos_bp
         ngram_bps[deck_size] = ngram_bp
+        if lstm_bps is not None:
+            lstm_bps[deck_size] = lstm_bp
         deficits_out[deck_size] = {
             "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
             **{
@@ -205,21 +307,58 @@ def breaking_point_per_deck_size(
         positional_breaking_points=positional_bps,
         ngram_breaking_points=ngram_bps,
         sample_deficits=deficits_out,
+        lstm_breaking_points=lstm_bps,
     )
 
 
-class TVDPerIterResult(NamedTuple):
+def _ckpt_load_episodes(ds_ckpt: Path | None, name: str) -> np.ndarray | None:
+    if ds_ckpt is None:
+        return None
+    d = ds_ckpt / name
+    npy = d / "episodes.npy"
+    if npy.exists():
+        return np.load(npy)
+    npz = d / "episodes.npz"
+    return np.load(npz)["arr_0"] if npz.exists() else None
+
+
+def _ckpt_save_episodes(ds_ckpt: Path | None, name: str, episodes: np.ndarray) -> None:
+    if ds_ckpt is None:
+        return
+    d = ds_ckpt / name
+    d.mkdir(parents=True, exist_ok=True)
+    # np.save is much faster than np.savez_compressed for near-random data (permutations
+    # compress poorly, so zlib burns CPU cycles for minimal size reduction)
+    np.save(d / "episodes.npy", episodes)
+
+
+def _ckpt_load_metrics(ds_ckpt: Path | None, name: str) -> dict | None:
+    if ds_ckpt is None:
+        return None
+    path = ds_ckpt / name / "metrics.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def _ckpt_save_metrics(ds_ckpt: Path | None, name: str, metrics: dict) -> None:
+    if ds_ckpt is None:
+        return
+    d = ds_ckpt / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "metrics.json").write_text(json.dumps(metrics))
+
+
+class BiasPerIterResult(NamedTuple):
     options: FullOptions  # options after inference for dataset
     tvds: np.ndarray  # shape (max_iterations,)
     baseline_tvd: float
     ngram_tvds: np.ndarray  # shape (max_iterations, len(ngram_degrees))
     baseline_ngram_tvds: np.ndarray  # shape (len(ngram_degrees),)
     sample_deficits: dict  # metric_name -> int
-    lstm_predictabilities: np.ndarray | None = None  # shape (max_iterations, len(ngram_degrees))
-    baseline_lstm_predictabilities: np.ndarray | None = None  # shape (len(ngram_degrees),)
+    lstm_predictabilities: np.ndarray | None = None  # shape (max_iterations,)
+    baseline_lstm_predictabilities: float | None = None
 
 
-def tvd_per_iteration(
+def bias_per_iteration(
     deck_size: int,
     num_samples: int,
     max_iterations: int,
@@ -230,7 +369,7 @@ def tvd_per_iteration(
     dtype: torch.dtype,
     device: str,
     lstm_settings: LSTMSettings | None = None,
-) -> TVDPerIterResult:
+) -> BiasPerIterResult:
     """Measure the Total Variation Distance of the deck shuffling as a function of the number of shuffle iterations.
 
     :param deck_size: The generated deck is a monotonically increasing sequence from 0 to `deck_size-1`
@@ -242,7 +381,8 @@ def tvd_per_iteration(
     :param ngram_skips: Skip values paired with ``ngram_degrees``; ``0`` means adjacent elements.
     :param dtype: Torch dtype for the deck tensor.
     :param device: Torch device on which to allocate and shuffle the deck tensor.
-    :param lstm_settings: If provided, trains an LSTM per n-gram degree to measure RTD predictability.
+    :param lstm_settings: If provided, trains an LSTM to measure RTD predictability using the
+        context window size from ``settings.context_length``.
     """
     ngram_pairs = list(zip(ngram_degrees, ngram_skips))
     deck = torch.arange(deck_size, dtype=dtype, device=device)
@@ -250,7 +390,7 @@ def tvd_per_iteration(
 
     tvds = np.zeros(max_iterations, dtype=float)
     ngram_tvds = np.zeros((max_iterations, len(ngram_pairs)), dtype=float)
-    lstm_pred = np.zeros((max_iterations, len(ngram_degrees))) if lstm_settings is not None else None
+    lstm_pred = np.zeros(max_iterations) if lstm_settings is not None else None
 
     # Initialize samples and determine the TVD of the POV Shuffle after each iteration
     samples = deck.unsqueeze(0).expand(num_samples, -1).clone()
@@ -261,7 +401,7 @@ def tvd_per_iteration(
         tvds[i] = get_tvd(samples_np)
         ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
         if lstm_settings is not None:
-            lstm_pred[i, :] = [lstm_predictability(samples_np, deck_size, n, lstm_settings, device) for n in ngram_degrees]
+            lstm_pred[i] = lstm_predictability(samples_np, deck_size, lstm_settings, device)
 
     # Re-initialize samples and determine the TVD of a perfect shuffle (baseline)
     samples_np = deck.unsqueeze(0).expand(num_samples, -1).clone().cpu().numpy()
@@ -270,9 +410,7 @@ def tvd_per_iteration(
     baseline_tvd = get_tvd(samples_np)
     baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
     baseline_lstm = (
-        np.array([lstm_predictability(samples_np, deck_size, n, lstm_settings, device) for n in ngram_degrees])
-        if lstm_settings is not None
-        else None
+        lstm_predictability(samples_np, deck_size, lstm_settings, device) if lstm_settings is not None else None
     )
 
     sample_deficits = {
@@ -285,7 +423,7 @@ def tvd_per_iteration(
         },
     }
 
-    return TVDPerIterResult(
+    return BiasPerIterResult(
         tvds=tvds,
         baseline_tvd=baseline_tvd,
         ngram_tvds=ngram_tvds,

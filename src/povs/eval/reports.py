@@ -3,7 +3,7 @@ from typing import NamedTuple
 import matplotlib.figure
 import pandas as pd
 
-from .params import BreakingPointParams, TimePerDeckSizeParams, TVDPerIterParams
+from .params import BiasPerIterParams, BreakingPointParams, TimePerDeckSizeParams
 
 
 class TimePerDeckSizeReport(NamedTuple):
@@ -37,12 +37,12 @@ class TimePerDeckSizeReport(NamedTuple):
     cuda_compute_capability: float
 
 
-class TVDPerIterReport(NamedTuple):
-    """TVD per iteration experiment report.
+class BiasPerIterReport(NamedTuple):
+    """Bias per iteration experiment report.
 
     **Results & Metrics**:
 
-    - `plot`: Matplotlib figure visualising TVD convergence across iterations.
+    - `plot`: Matplotlib figure visualising bias convergence across iterations.
     - `host_shuffle_load`: Amount of shuffle happening on the host side within each iteration (non-parallel),
                            as a percentage of the `deck_size`.
 
@@ -53,39 +53,33 @@ class TVDPerIterReport(NamedTuple):
     - `num_valid_offsets`: Number of valid offsets that may have been used in the shuffle iterations,
                            depending on the offset parameters in `povs_options`.
 
-    - `baseline_tvd`: Observed TVD for a true uniform shuffle on the same dataset; lower bound for a perfect shuffler.
-                      In theory this should be zero, but if the sample size is too small and the deck size too large,
-                      the statistic may not converge to zero.
+    - `baseline_tvd`: Observed positional TVD for a true uniform shuffle on the same dataset.
+    - `baseline_ngram_tvds`: Observed N-gram TVD of the baseline shuffle, one value per (degree, skip) pair.
+    - `baseline_lstm_predictability`: LSTM predictability of the baseline shuffle (if LSTM enabled).
 
-    - `baseline_ngram_tvds`: Observed N-gram TVD of the baseline shuffle, one value per (degree, skip) pair in
-                             `ngram_degrees` / `ngram_skips`. Same considerations as `baseline_tvd` apply.
-
-    - `tvds`: DataFrame with one row per iteration. Columns:
+    - `biases`: DataFrame with one row per iteration. Columns:
       - `iteration`: Iteration number (1-indexed).
-      - `tvd`: Total Variation Distance of the POV Shuffle at that iteration.
       - `cumulative_exposure`: Fraction of the dataset scanned by each worker up to that iteration.
-
-    - `ngram_tvds`: DataFrame with one row per iteration and one column per (degree, skip) pair, named
-      ``"{n}-gram"`` or ``"{n}-gram (skip {s})"`` when skip > 0.
+      - `positional`: Positional TVD at that iteration.
+      - ``"{n}-gram"`` / ``"{n}-gram (skip {s})"``: N-gram TVD at that iteration.
+      - `lstm_predictability`: LSTM predictability at that iteration (only present if LSTM is enabled).
 
     - `sample_deficits`: How many more samples would be needed to observe all valid events at least once,
       per metric. Keys: ``"positional"``, ``"{n}-gram"`` / ``"{n}-gram (skip {s})"``.
       Zero when exactly covered; negative when oversampled.
     """
 
-    params: TVDPerIterParams
+    params: BiasPerIterParams
     worker_data_scan_per_iter: float
     num_valid_offsets: int
     ideal_worker_count: int
     host_shuffle_load: float
     baseline_tvd: float
     baseline_ngram_tvds: list[float]
-    tvds: pd.DataFrame
-    ngram_tvds: pd.DataFrame
+    biases: pd.DataFrame
     plot: matplotlib.figure.Figure
     sample_deficits: dict[str, int]
-    lstm_predictabilities: pd.DataFrame | None = None
-    baseline_lstm_predictabilities: list[float] | None = None
+    baseline_lstm_predictability: float | None = None
 
 
 class BreakingPointPerDeckSizeReport(NamedTuple):
@@ -100,6 +94,8 @@ class BreakingPointPerDeckSizeReport(NamedTuple):
       - `deck_size`: Number of elements in the deck.
       - `positional`: Iteration at which positional bias converged; ``NaN`` if not converged.
       - ``"{n}-gram"`` / ``"{n}-gram (skip {s})"``: Iteration at which n-gram bias converged; ``NaN`` if not.
+      - `lstm_predictability`: Iteration at which LSTM predictability converged; ``NaN`` if not (only present
+        when ``lstm_settings`` is configured).
       - `overall`: Latest convergence iteration across all metrics (only set when all metrics converged).
 
     - `non_convergences`: Metrics that did not converge within the iteration limit, keyed by deck size.

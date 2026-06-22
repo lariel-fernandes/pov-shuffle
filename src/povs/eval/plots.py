@@ -72,6 +72,7 @@ def plot_breaking_point_per_deck_size(
     positional_breaking_points: list,
     ngram_breaking_points: dict,
     max_iterations: list,
+    lstm_breaking_points: list | None = None,
 ) -> matplotlib.figure.Figure:
     """Plot breaking point (iterations to convergence) vs deck size for each bias metric.
 
@@ -80,6 +81,7 @@ def plot_breaking_point_per_deck_size(
     :param ngram_breaking_points: Convergence iterations keyed by formatted metric name (e.g. ``"2-gram"``,
         ``"3-gram (skip 2)"``), values are lists indexed per deck size.
     :param max_iterations: Resolved iteration cap per deck size; used as the y-position for non-convergence markers.
+    :param lstm_breaking_points: Convergence iteration per deck size for LSTM predictability; omitted if ``None``.
     :returns: Matplotlib figure.
     """
     fig, ax = plt.subplots()
@@ -106,10 +108,13 @@ def plot_breaking_point_per_deck_size(
             ax.scatter(nc_x, nc_y, marker="^", color=color, zorder=5, label=nc_label)
             did_not_converge_added = True
 
-    colors = [f"C{i}" for i in range(1 + len(ngram_breaking_points))]
+    n_metrics = 1 + len(ngram_breaking_points) + (1 if lstm_breaking_points is not None else 0)
+    colors = [f"C{i}" for i in range(n_metrics)]
     _plot_metric(positional_breaking_points, "Positional bias", colors[0])
     for i, (name, values) in enumerate(ngram_breaking_points.items()):
         _plot_metric(values, f"{name} bias", colors[i + 1])
+    if lstm_breaking_points is not None:
+        _plot_metric(lstm_breaking_points, "LSTM pred. bias", colors[len(ngram_breaking_points) + 1])
 
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_xscale("log", base=10)
@@ -123,15 +128,17 @@ def plot_breaking_point_per_deck_size(
     return fig
 
 
-def plot_tvd_per_iteration(
+def plot_bias_per_iteration(
     tvds: np.ndarray,
     baseline: float,
     worker_data_scan_per_iter: float,
     ngram_tvds: np.ndarray,
     ngram_names: list[str],
     baseline_ngram_tvds: np.ndarray,
+    lstm_predictabilities: np.ndarray | None = None,
+    baseline_lstm_predictability: float | None = None,
 ) -> matplotlib.figure.Figure:
-    """Plot Total Variation Distance as a function of shuffle iterations.
+    """Plot bias metrics as a function of shuffle iterations.
 
     :param tvds: 1-D array of positional TVD values, one per iteration (index 0 = iteration 1).
     :param baseline: Observed positional TVD for the baseline shuffle on the same dataset size.
@@ -140,6 +147,8 @@ def plot_tvd_per_iteration(
     :param ngram_names: Formatted metric names (e.g. ``"2-gram"``, ``"3-gram (skip 2)"``) corresponding
         to columns in ``ngram_tvds``.
     :param baseline_ngram_tvds: Observed n-gram TVD for the baseline shuffle, one value per entry in ngram_names.
+    :param lstm_predictabilities: 1-D array of LSTM predictability values per iteration; omitted if ``None``.
+    :param baseline_lstm_predictability: LSTM predictability of the baseline shuffle; omitted if ``None``.
     :returns: Matplotlib figure.
     """
     fig, ax = plt.subplots()
@@ -152,24 +161,40 @@ def plot_tvd_per_iteration(
         ax.plot(iterations, ngram_tvds[:, i], marker="o", color=color, label=f"{name} bias")
         ax.axhline(y=baseline_ngram_tvds[i], color=color, linestyle="--")
 
+    if lstm_predictabilities is not None:
+        lstm_color = f"C{len(ngram_names) + 1}"
+        ax_pred = ax.twinx()
+        all_pred = list(lstm_predictabilities) + (
+            [baseline_lstm_predictability] if baseline_lstm_predictability is not None else []
+        )
+        y_lo = min(0.4, np.floor(min(all_pred) * 10) / 10)
+        y_hi = max(0.6, np.ceil(max(all_pred) * 10) / 10)
+        ax_pred.set_ylim(y_lo, y_hi)
+        ax_pred.set_ylabel("LSTM Predictability (R²)")
+        ax_pred.plot(iterations, lstm_predictabilities, marker="o", color=lstm_color, label="LSTM pred. bias")
+        if baseline_lstm_predictability is not None:
+            ax_pred.axhline(y=baseline_lstm_predictability, color=lstm_color, linestyle="--")
+        lstm_handles, lstm_labels = ax_pred.get_legend_handles_labels()
+    else:
+        lstm_handles, lstm_labels = [], []
+
     ax.set_xlabel("Iterations")
-    ax.set_ylabel("Total Variation Distance")
-    fig.suptitle("TVD per Iteration")
+    ax.set_ylabel("Bias")
+    fig.suptitle("Bias per Iteration")
     ax.set_title("POV and baseline deviations from uniform", fontsize=9)
     ax.grid(True)
     handles, labels = ax.get_legend_handles_labels()
-    handles.append(Line2D([0], [0], color="black", linestyle="--"))
-    labels.append("Baseline")
-    ax.legend(handles=handles, labels=labels)
+    baseline_handle = Line2D([0], [0], color="black", linestyle="--")
+    ax.legend(handles=handles + lstm_handles + [baseline_handle], labels=labels + lstm_labels + ["Baseline"])
 
-    ax2 = ax.secondary_xaxis(
+    ax_top = ax.secondary_xaxis(
         "top",
         functions=(
             lambda x: x * worker_data_scan_per_iter,
             lambda x: x / worker_data_scan_per_iter,
         ),
     )
-    ax2.set_xlabel("Data Scan per Worker (%)")
+    ax_top.set_xlabel("Data Scan per Worker (%)")
     fig.tight_layout()
 
     return fig

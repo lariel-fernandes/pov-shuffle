@@ -51,9 +51,15 @@ def get_tvd(samples: np.ndarray) -> float:
     num_valid = deck_size
     p_ref = 1.0 / min(total, num_valid)
 
-    positions = np.tile(np.arange(deck_size), num_samples)
-    travel_distances = (positions - samples.ravel()) % deck_size
-    counts = np.bincount(travel_distances, minlength=deck_size)
+    # Process in batches: avoid allocating (num_samples * deck_size,) in one shot.
+    _MAX_BYTES = 256 * 1024 * 1024  # 256 MB cap for the (batch, deck_size) int64 array
+    batch_size = max(1, _MAX_BYTES // (deck_size * 8))
+    arange = np.arange(deck_size, dtype=np.int64)
+    counts = np.zeros(deck_size, dtype=np.int64)
+    for start in range(0, num_samples, batch_size):
+        batch = samples[start : start + batch_size].astype(np.int64)  # (b, deck_size)
+        tds = (arange - batch) % deck_size  # (b, deck_size), broadcast
+        counts += np.bincount(tds.ravel(), minlength=deck_size)
     # bincount fills zeros for unobserved distances, so the sum already covers the full event space
     return float(0.5 * np.abs(counts / total - p_ref).sum())
 
@@ -82,8 +88,8 @@ def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
                     + (min(total, num_valid) - num_observed) * p_ref ]
 
     Observed events are counted sparsely (no enumeration of all valid tuples), so the unobserved
-    contribution is computed analytically. This makes the formula O(total) in time and memory
-    regardless of ``n``, ``skip``, or ``deck_size``.
+    contribution is computed analytically. Episodes are processed in batches to keep peak memory
+    proportional to ``batch_size * deck_size * n`` rather than ``num_samples * deck_size * n``.
 
     **Sampling regimes**:
 
@@ -106,28 +112,74 @@ def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
 
     step = skip + 1
     col_indices = np.arange(deck_size).reshape(deck_size, 1) + np.arange(0, n * step, step).reshape(1, n)
-    ngrams = samples.take(col_indices, axis=1, mode="wrap")  # (num_samples, deck_size, n)
-    rtds = _relative_travel_distances(ngrams, skip)  # (num_samples, deck_size, n-1), signed
-    del ngrams  # free before encoding keys to keep peak memory bounded
-    # Convert signed RTDs to modular form for uniform counting: applying % deck_size collapses
-    # the signed range into deck_size - 1 equally-likely equivalence classes under a uniform shuffle.
-    flat_rtds = (rtds % deck_size).reshape(-1, n - 1).astype(np.int64)  # (total, n-1)
+
+    # Batch over episodes to cap the (batch_size, deck_size, n) intermediate arrays
+    _MAX_BYTES = 256 * 1024 * 1024  # 256 MB
+    bytes_per_episode = deck_size * max(n * samples.itemsize, (n - 1) * 8)
+    batch_size = max(1, _MAX_BYTES // bytes_per_episode)
 
     if n == 2:
-        # Modular RTDs are scalars in {0,...,deck_size-1} \ {(deck_size - skip - 1) % deck_size}
-        # bincount covers the full range including the one impossible bin (count=0 there)
+        # n=2: RTDs are scalars; accumulate bincount across batches
         excluded = (deck_size - skip - 1) % deck_size
-        counts = np.delete(np.bincount(flat_rtds.ravel(), minlength=deck_size), excluded)
+        counts = np.zeros(deck_size, dtype=np.int64)
+        for start in range(0, num_samples, batch_size):
+            batch = samples[start : start + batch_size]
+            ngrams = batch.take(col_indices, axis=1, mode="wrap")  # (b, deck_size, 2)
+            rtds = _relative_travel_distances(ngrams, skip)  # (b, deck_size, 1)
+            del ngrams
+            counts += np.bincount((rtds % deck_size).ravel().astype(np.int64), minlength=deck_size)
+        counts = np.delete(counts, excluded)
         return float(0.5 * np.abs(counts / total - p_ref).sum())
     else:
-        # Encode each RTD tuple as a single int64 key, then count sparsely with np.unique
+        # n>2: encode RTD tuples as int64 keys.
+        # Two memory concerns:
+        #   1. Intermediate (batch, pos, n) arrays: already bounded by _MAX_BYTES via batch_size.
+        #   2. The final keys array: total = num_samples * deck_size int64 values, which for
+        #      large decks can reach several GB and then np.unique needs a second sorted copy.
+        #      Cap it by subsampling positions — the metric is already undersampled at large
+        #      deck sizes so the estimate is statistically equivalent.
+        _MAX_KEY_BYTES = 512 * 1024 * 1024  # 512 MB for the pre-allocated keys array
+        max_keys = _MAX_KEY_BYTES // 8
+        if total > max_keys:
+            pos_per_sample = max(1, max_keys // num_samples)
+            sampled_pos = np.sort(np.random.choice(deck_size, pos_per_sample, replace=False))
+            step_offsets = np.arange(0, n * step, step)
+            eff_col_indices = (sampled_pos.reshape(-1, 1) + step_offsets.reshape(1, n)) % deck_size
+            effective_total = num_samples * pos_per_sample
+        else:
+            eff_col_indices = col_indices
+            pos_per_sample = deck_size
+            effective_total = total
+        # Recompute p_ref against the actual observation count after subsampling
+        p_ref = 1.0 / min(effective_total, num_valid)
+
+        # Rebatch based on (possibly smaller) pos_per_sample, then pre-allocate the key array.
+        # Pre-allocation (vs accumulating a list + concatenating) avoids the 2x memory spike
+        # from holding both the list and the concatenated result simultaneously.
+        bytes_per_ep = pos_per_sample * max(n * samples.itemsize, (n - 1) * 8)
+        ep_batch = max(1, _MAX_BYTES // bytes_per_ep)
         powers = np.array([deck_size**i for i in range(n - 2, -1, -1)], dtype=np.int64)
-        keys = flat_rtds @ powers
-        _, counts = np.unique(keys, return_counts=True)
+        all_keys = np.empty(effective_total, dtype=np.int64)
+        offset = 0
+        for start in range(0, num_samples, ep_batch):
+            batch = samples[start : start + ep_batch]
+            b = len(batch)
+            chunk = b * pos_per_sample
+            ngrams = batch.take(eff_col_indices, axis=1, mode="wrap")  # (b, pos_per_sample, n)
+            rtds = _relative_travel_distances(ngrams, skip)
+            del ngrams
+            flat_rtds = (rtds % deck_size).reshape(-1, n - 1).astype(np.int64)
+            del rtds
+            all_keys[offset : offset + chunk] = flat_rtds @ powers
+            del flat_rtds
+            offset += chunk
+
+        _, counts = np.unique(all_keys, return_counts=True)
+        del all_keys
         num_observed = len(counts)
         # np.unique only returns non-zero counts; add unobserved contribution analytically
-        observed = float(0.5 * np.sum(np.abs(counts / total - p_ref)))
-        unobserved = 0.5 * (min(total, num_valid) - num_observed) * p_ref
+        observed = float(0.5 * np.sum(np.abs(counts / effective_total - p_ref)))
+        unobserved = 0.5 * (min(effective_total, num_valid) - num_observed) * p_ref
         return observed + unobserved
 
 

@@ -23,6 +23,9 @@ class BreakingPointParams(NamedTuple):
     - `default_options`: Default POV Shuffle options for deck sizes without specific options.
     - `dtype`: Torch dtype name for the deck tensor (e.g. ``"int32"``, ``"int64"``).
     - `device`: Torch device on which the deck tensor lives and is shuffled (e.g. ``"cpu"``, ``"cuda"``).
+    - `lstm_settings`: If provided, an LSTM is trained at each iteration and its breaking point is tracked
+      alongside the TVD metrics. A single shared architecture is used across all deck sizes.
+    - `lstm_tolerance`: Convergence threshold for LSTM predictability: ``pred_pov - pred_baseline < tolerance``.
     """
 
     seed: int
@@ -39,6 +42,8 @@ class BreakingPointParams(NamedTuple):
     default_options: Options | None
     dtype: str
     device: str
+    lstm_settings: LSTMSettings | None = None
+    lstm_tolerance: float = 0.01
 
 
 class TimePerDeckSizeParams(NamedTuple):
@@ -69,7 +74,7 @@ class TimePerDeckSizeParams(NamedTuple):
     cuda_device_id: int = 0
 
 
-class TVDPerIterParams(NamedTuple):
+class BiasPerIterParams(NamedTuple):
     """TVD per iteration experiment parameters.
 
     - `seed`: RNG seed for reproducibility.

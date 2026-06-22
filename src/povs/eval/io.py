@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .reports import BreakingPointPerDeckSizeReport, TimePerDeckSizeReport, TVDPerIterReport
+from .reports import BiasPerIterReport, BreakingPointPerDeckSizeReport, TimePerDeckSizeReport
 from .utils import yaml
 
 
@@ -30,24 +30,14 @@ def save_breaking_point_report(path: Path, report: BreakingPointPerDeckSizeRepor
     plot.savefig(path / "plot.png")
 
 
-def save_tvd_per_iter_report(path: Path, report: TVDPerIterReport) -> None:
+def save_bias_per_iter_report(path: Path, report: BiasPerIterReport) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
     details = report._asdict()
     plot = details.pop("plot")
-    tvds = details.pop("tvds")
-    ngram_tvds = details.pop("ngram_tvds")
-    lstm_predictabilities = details.pop("lstm_predictabilities")
+    biases = details.pop("biases")
 
     (path / "details.yml").write_text(yaml.dump(details))
-
     (path / "README.md").write_text(report.__doc__)
-
-    tvds.to_csv(path / "tvds.csv", index=False)
-
-    ngram_tvds.to_csv(path / "ngram_tvds.csv", index=False)
-
-    if lstm_predictabilities is not None:
-        lstm_predictabilities.to_csv(path / "lstm_predictabilities.csv", index=False)
-
+    biases.to_csv(path / "biases.csv", index=False)
     plot.savefig(path / "plot.png")
