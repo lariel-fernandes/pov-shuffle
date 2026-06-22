@@ -69,3 +69,21 @@ With the event space being all possible tuples of relative travel distances for 
 of independent shuffling episodes (using either the baseline `numpy.shuffle` or the POV-shuffle algorithm)
 and use the observations to estimate the distribution of relative travel distance tuples.
 The N-gram TVD measures how much that distribution differs from a uniform one.
+
+### LSTM predictability
+
+We build a sample of independent shuffling episodes (using either the baseline `numpy.shuffle` or the POV-shuffle algorithm)
+and use it to train and test (with non-overlapping splits) an LSTM predictive model.
+
+The model's task is to predict the last relative travel distance of each n-gram or skip-gram, using the previous distances as input.
+To avoid noise from the deck size, the distances are divided by the deck size to normalize the target range between -1 and 1
+(tanh activation ensures a matching prediction range).
+
+The predictability is the coefficient of determination (R²) of the LSTM on the test split:
+```
+R² = 1 - MSE / Var(y_test)
+```
+Where `MSE` is the test-split mean squared error and `Var(y_test)` is the variance of the test targets
+(equivalently, the MSE of a naive predictor that always outputs the test-set mean).
+This sets the zero point at "no better than predicting the mean", so the metric ranges from
+0 (no exploitable sequential structure) to 1 (perfectly predictable).
