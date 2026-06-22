@@ -2,7 +2,6 @@ import warnings
 
 import torch
 
-from ._cuda import torch_binding
 from .common import choose_offsets, get_dtype_bytes, get_instance_size, povs_preflight
 from .constants import (
     CUDA_CC_IDEAL_OCCUPANCY,
@@ -30,6 +29,8 @@ def shuffle(
     :param options: POV Shuffle algorithm options.
     :param seed: Random seed or random number generator state.
     """
+    from ._cuda import torch_binding  # Lazy import in case package was built without CUDA
+
     preflight(data, iterations, options)
 
     # Delegate to bound CUDA library

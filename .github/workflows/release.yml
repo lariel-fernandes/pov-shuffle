@@ -27,6 +27,8 @@ jobs:
         run: sed -i "s/^version = .*/version = \"${GITHUB_REF_NAME#v}\"/" pyproject.toml
 
       - name: Build sdist
+        env:
+          POVS_CUDA_ENABLE: false  # Skip CUDA requirements for source distribution
         run: uv build --sdist
 
       - name: pypi-publish

@@ -3,7 +3,6 @@ import json
 import os
 import textwrap
 import typing
-import warnings
 from pathlib import Path
 from typing import ForwardRef, NamedTuple
 
@@ -15,6 +14,7 @@ from setuptools import setup
 class EnvVars(NamedTuple):
     """Environment variables for build configuration."""
 
+    POVS_CUDA_ENABLE:                     bool                            = "true"   # Enable CUDA extension
     POVS_CUDA_DEBUG_MODE:                 bool                            = "false"  # Build with debug flags
     POVS_CUDA_CUDA_ARCH:                  list[str]                       = "native" # Comma-separated list of CUDA architectures (e.g.: 75,86 or native)
 
@@ -166,12 +166,9 @@ def get_generated_files(opts: EnvVars) -> list[tuple[str, str]]:
 
 build_options = load_env_vars()
 
-if not cutlass_library.__file__:
-    warnings.warn("CUTLASS lib not found")
-
-if (cuda_home := find_cuda_home()) is None:
-    warnings.warn("CUDA home not found")
-else:
+if build_options.POVS_CUDA_ENABLE:
+    assert cutlass_library.__file__, "CUTLASS lib not found"
+    assert (cuda_home := find_cuda_home()), "CUDA home not found"
     os.environ["CUDA_HOME"] = torch.utils.cpp_extension.CUDA_HOME = cuda_home
 
 
@@ -228,5 +225,5 @@ setup(
                 *torch.utils.cpp_extension.library_paths(),
             ],
         ),
-    ],
+    ] if build_options.POVS_CUDA_ENABLE else [],
 )
