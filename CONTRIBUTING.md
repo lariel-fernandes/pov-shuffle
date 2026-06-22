@@ -10,8 +10,9 @@ testing:
 
 evaluation:
 - [ ] experiment: compare the resulting TVD and other biases against a standard local block shuffle
-- [x] experiment: tvd breaking point by dataset size
-- [ ] experiment: sequential bias by iter with lstm evaluator
+
+features:
+- [ ] "large" povs accepting memmap file as input and shuffling in place in batches of virtual blocks
 
 ## Project Structure
 
@@ -67,9 +68,9 @@ find src -name "*.cpp" -o -name "*.h" -o -name "*.cu" | xargs clang-format -i
 ```
 
 ## Running Evaluations
-TVD per iteration:
+Bias per iteration:
 ```bash
-.venv/bin/python -m povs.eval.scripts.tvd_per_iter
+.venv/bin/python -m povs.eval.scripts.bias_per_iter
 ```
 - Find other evaluation scripts in [`src/povs/eval/scripts`](./src/povs/eval/scripts)
 
