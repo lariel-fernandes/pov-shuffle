@@ -35,7 +35,7 @@ jobs:
           sudo dpkg -i cuda-keyring_${CUDA_KEYRING_VERSION}_all.deb
           sudo apt-get update
           sudo apt-get -o Dir::Cache::Archives=${CUDA_APT_CACHE} install -y cuda-toolkit-${CUDA_TOOLKIT_VERSION}
-          sudo rm -rf ${CUDA_APT_CACHE}/partial
+          sudo rm -rf ${CUDA_APT_CACHE}/partial ${CUDA_APT_CACHE}/lock
 
       - name: Check UV lock file
         run: uv lock --locked
