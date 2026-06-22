@@ -21,6 +21,8 @@ jobs:
 
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          prune-cache: false
 
       - name: Cache CUDA apt packages
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
