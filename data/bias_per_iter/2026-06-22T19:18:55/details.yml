@@ -1,0 +1,48 @@
+params:
+  seed: 42
+  num_samples: 500
+  deck_size: 1024
+  max_iterations: 6
+  ngram_degrees:
+  - 2
+  - 3
+  ngram_skips:
+  - 0
+  - 0
+  povs_options:
+    virtual_block_size: 2
+    physical_block_size: 32
+    offsets:
+    - 0
+    - 4
+    - 8
+    - 12
+    - 16
+    - 20
+    - 24
+    - 28
+    gpu_thread_block_size: 32
+  dtype: int32
+  device: cuda
+  lstm_settings:
+    layers:
+    - 32
+    context_length: 16
+    learning_rate: 0.001
+    num_epochs: 15
+    batch_size: 512
+    train_ratio: 0.8
+    max_sequences: null
+worker_data_scan_per_iter: 0.128
+num_valid_offsets: 8
+ideal_worker_count: 16
+host_shuffle_load: 0.03125
+baseline_tvd: 0.01772656250000001
+baseline_ngram_tvds:
+- 0.017272137325879778
+- 0.2090546875
+sample_deficits:
+  positional: -510976
+  2-gram: -510977
+  3-gram: 533506
+baseline_lstm_predictability: 0.4652725844117702

@@ -1,0 +1,6 @@
+deck_size,positional,2-gram,3-gram,lstm_predictability,overall
+10000,6,5,4,2,6
+50000,7,5,4,2,7
+100000,7,5,4,2,7
+500000,7,5,4,2,7
+1000000,7,5,4,2,7

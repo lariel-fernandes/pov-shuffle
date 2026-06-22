@@ -55,19 +55,20 @@ the baseline used here is `numpy.shuffle`, which is also a uniform shuffle (Fish
 
 ### Bias Convergence
 
-[Positional TVD bias](./docs/GLOSSARY.md#positional-tvd) and [N-gram TVD biases](./docs/GLOSSARY.md#n-gram-tvd)
+[Positional TVD bias](./docs/GLOSSARY.md#positional-tvd), [N-gram TVD biases](./docs/GLOSSARY.md#n-gram-tvd)
+and [LSTM predictability bias](./docs/GLOSSARY.md#lstm-predictability)
 measured for the baseline `numpy.shuffle` and for increasing iterations of the POV-shuffle,
 on a dataset of 1k distinct instances and estimating the event distributions from the observation
 of 3k independent shuffling episodes.
 
-[![alt text](./data/tvd_per_iter/2026-06-20T23:12:46/plot.png)](./data/tvd_per_iter/2026-06-20T23:12:46)
+[![alt text](./data/bias_per_iter/2026-06-22T19:18:55/plot.png)](./data/bias_per_iter/2026-06-22T19:18:55)
 
 ### Breaking Point
 
 Minimum number of POV-shuffle iterations required for each bias metric to converge to the observed value
 of the respective metric for the baseline `numpy.shuffle`, as a function of the deck size.
 
-[![alt text](./data/breaking_point_per_deck_size/2026-06-20T23:32:19/plot.png)](./data/breaking_point_per_deck_size/2026-06-20T23:32:19)
+[![alt text](./data/breaking_point_per_deck_size/2026-06-22T14:05:38/report/plot.png)](./data/breaking_point_per_deck_size/2026-06-22T14:05:38/report)
 
 ## Algorithm
 

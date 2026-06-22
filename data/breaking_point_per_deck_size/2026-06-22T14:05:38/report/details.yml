@@ -10,6 +10,9 @@ params:
   ngram_degrees:
   - 2
   - 3
+  ngram_skips:
+  - 0
+  - 0
   positional_tolerance: 0.01
   ngram_tolerances: {}
   default_ngram_tolerance: 0.01
@@ -88,6 +91,15 @@ params:
     gpu_thread_block_size: null
   dtype: int32
   device: cuda
+  lstm_settings:
+    layers:
+    - 32
+    context_length: 16
+    learning_rate: 0.001
+    num_epochs: 15
+    batch_size: 512
+    train_ratio: 0.8
+    max_sequences: 2000000
 non_convergences: {}
 sample_deficits:
   10000:
