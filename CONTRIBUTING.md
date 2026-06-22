@@ -64,7 +64,7 @@ find src -name "*.cpp" -o -name "*.h" -o -name "*.cu" | xargs clang-format -i
 
 ## Test
 ```bash
-.venv/bin/python -m pytest ./src/tests/ -v
+uv run --no-sync pytest ./src/tests/ -v
 ```
 
 ## Running Evaluations
