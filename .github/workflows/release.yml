@@ -23,6 +23,9 @@ jobs:
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
 
+      - name: Set version from tag
+        run: sed -i "s/^version = .*/version = \"${GITHUB_REF_NAME#v}\"/" pyproject.toml
+
       - name: Build sdist
         run: uv build --sdist
 

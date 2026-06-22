@@ -7,9 +7,9 @@ on:
     branches: [main]
 
 env:
-  UV_CACHE_DIR: ~/.cache/uv
   CUDA_KEYRING_VERSION: 1.1-1
   CUDA_TOOLKIT_VERSION: 13-0
+  CUDA_APT_CACHE: /home/runner/apt-cuda-cache
 
 jobs:
   validate:
@@ -22,24 +22,20 @@ jobs:
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
 
-      - name: Cache uv
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-          path: ${{ env.UV_CACHE_DIR }}
-
       - name: Cache CUDA apt packages
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           key: apt-cuda-${{ env.CUDA_TOOLKIT_VERSION }}
-          path: /var/cache/apt/archives
+          path: ${{ env.CUDA_APT_CACHE }}
 
       - name: Install CUDA toolkit
         run: |
+          mkdir -p ${CUDA_APT_CACHE}
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_${CUDA_KEYRING_VERSION}_all.deb
           sudo dpkg -i cuda-keyring_${CUDA_KEYRING_VERSION}_all.deb
           sudo apt-get update
-          sudo apt-get install -y cuda-toolkit-${CUDA_TOOLKIT_VERSION}
+          sudo apt-get -o Dir::Cache::Archives=${CUDA_APT_CACHE} install -y cuda-toolkit-${CUDA_TOOLKIT_VERSION}
+          sudo rm -rf ${CUDA_APT_CACHE}/partial
 
       - name: Check UV lock file
         run: uv lock --locked
