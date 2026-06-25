@@ -1,4 +1,4 @@
-from typing import Literal, NamedTuple
+from typing import NamedTuple
 
 
 class BuildParams(NamedTuple):
