@@ -11,8 +11,9 @@ from povs import optim_options_for_dataset, shuffle
 from povs.types import FullOptions, Options
 
 from .lstm import LSTMSettings, lstm_predictability
-from .metrics import get_ngram_tvd, get_ngram_tvd_num_valid, get_sample_deficit, get_tvd, get_tvd_num_valid
-from .utils import ngram_metric_name, time_cpu_op, time_cuda_op
+from .metrics import get_ngram_tvd, get_ngram_tvd_event_space, get_pos_tvd_event_space, get_sample_deficit, get_tvd
+from .types import NgramSpec
+from .utils import time_cpu_op, time_cuda_op
 
 _logger = logging.getLogger(__name__)
 
@@ -106,19 +107,23 @@ def shuffle_time_per_deck_size(
     )
 
 
+class _BreakingPointPerDeckSizeResult(NamedTuple):
+    options: FullOptions  # metric_name -> deficit
+    sample_deficit: dict[str, int]
+    positional_breaking_point: int | None = None
+    ngram_breaking_points: dict[NgramSpec, int | None] = {}  # (n, skip) -> iteration | None
+    lstm_breaking_point: int | None = None
+    non_convergences: list[str] | None = None  # metric names that did not converge within max iterations
+
+
 class BreakingPointPerDeckSizeResult(NamedTuple):
-    options: dict  # deck_size -> FullOptions (after inference)
-    positional_breaking_points: dict  # deck_size -> iteration (1-indexed) | None if not converged
-    ngram_breaking_points: dict  # deck_size -> {(n, skip) -> iteration | None}
-    sample_deficits: dict  # deck_size -> {metric_name -> int}
-    lstm_breaking_points: dict | None = None  # deck_size -> iteration | None; set only when lstm_settings provided
+    deck_sizes: dict[int, _BreakingPointPerDeckSizeResult]  # deck_size -> _BreakingPointPerDeckSizeResult
 
 
 def breaking_point_per_deck_size(
     deck_sizes: list,
-    num_samples: int,
-    ngram_degrees: list,
-    ngram_skips: list,
+    num_episodes: int,
+    ngram_specs: list[NgramSpec],
     positional_tolerance: float,
     ngram_tolerances: dict,
     default_ngram_tolerance: float,
@@ -139,9 +144,8 @@ def breaking_point_per_deck_size(
     of the corresponding baseline TVD, or the iteration cap is reached.
 
     :param deck_sizes: Deck sizes to test.
-    :param num_samples: Number of independent shuffles sampled to estimate the output distribution.
-    :param ngram_degrees: N-gram degrees for which bias convergence is measured.
-    :param ngram_skips: Skip values paired with ``ngram_degrees``; ``0`` means adjacent elements.
+    :param num_episodes: Number of independent shuffles sampled to estimate the output distribution.
+    :param ngram_specs: N-gram degrees to measure TVD, optionally with skip values to define skip-grams.
     :param positional_tolerance: Convergence threshold for positional TVD.
     :param ngram_tolerances: Per-degree convergence thresholds, keyed by n-gram degree.
     :param default_ngram_tolerance: Fallback threshold for degrees absent from ``ngram_tolerances``.
@@ -159,176 +163,163 @@ def breaking_point_per_deck_size(
         ``<checkpoint_dir>/<deck_size>/baseline/`` and ``<checkpoint_dir>/<deck_size>/pov_<k>/``.
         Existing checkpoints are loaded instead of recomputed, enabling crash recovery.
     """
-    ngram_pairs = list(zip(ngram_degrees, ngram_skips))
-    options_out = {}
-    positional_bps = {}
-    ngram_bps = {}
-    deficits_out = {}
-    lstm_bps: dict | None = {} if lstm_settings is not None else None
+    final_result = BreakingPointPerDeckSizeResult(deck_sizes={})
 
     for deck_size in tqdm(deck_sizes, desc="Deck sizes"):
         deck = torch.arange(deck_size, dtype=dtype, device=device)
         cur_options = optim_options_for_dataset(deck, povs_options_per_deck_size.get(deck_size) or default_options)
-        options_out[deck_size] = cur_options
+
+        final_result.deck_sizes[deck_size] = result = _BreakingPointPerDeckSizeResult(
+            options=cur_options,
+            sample_deficit={
+                "positional": get_sample_deficit(num_episodes, deck_size, get_pos_tvd_event_space(deck_size)),
+                **{
+                    spec.title: get_sample_deficit(
+                        num_episodes, deck_size, get_ngram_tvd_event_space(deck_size, spec.n)
+                    )
+                    for spec in ngram_specs
+                },
+            },
+        )
+
         max_iter = max_iterations_per_deck_size.get(deck_size, default_max_iterations)
         ds_ckpt = checkpoint_dir / str(deck_size) if checkpoint_dir is not None else None
         _logger.info("deck=%d: starting (max_iterations=%d)", deck_size, max_iter)
 
         # --- Baseline ---
-        baseline_samples = _ckpt_load_episodes(ds_ckpt, "baseline")
-        if baseline_samples is None:
-            _logger.info("deck=%d baseline: generating %d episodes", deck_size, num_samples)
-            baseline_samples = deck.unsqueeze(0).expand(num_samples, -1).clone().cpu().numpy()
-            for s in tqdm(range(num_samples), desc="Baseline samples", leave=False):
-                rng.shuffle(baseline_samples[s])
-            _ckpt_save_episodes(ds_ckpt, "baseline", baseline_samples)
-        else:
+        if baseline_eps := _ckpt_load_episodes(ds_ckpt, "baseline"):
             _logger.info("deck=%d baseline: loaded episodes from checkpoint", deck_size)
+        else:
+            _logger.info("deck=%d baseline: generating %d episodes", deck_size, num_episodes)
+            baseline_eps = deck.unsqueeze(0).expand(num_episodes, -1).clone().cpu().numpy()
+            for i in tqdm(range(num_episodes), desc="Baseline episodes", leave=False):
+                rng.shuffle(baseline_eps[i])
+            _ckpt_save_episodes(ds_ckpt, "baseline", baseline_eps)
 
         baseline_metrics = _ckpt_load_metrics(ds_ckpt, "baseline") or {}
 
         if "positional" not in baseline_metrics:
             _logger.info("deck=%d baseline: computing positional TVD", deck_size)
-            baseline_metrics["positional"] = get_tvd(baseline_samples)
+            baseline_metrics["positional"] = get_tvd(baseline_eps)
             _ckpt_save_metrics(ds_ckpt, "baseline", baseline_metrics)
         else:
             _logger.info("deck=%d baseline: positional TVD loaded from checkpoint", deck_size)
 
-        for n, skip in ngram_pairs:
-            key = ngram_metric_name(n, skip)
-            if key not in baseline_metrics:
-                _logger.info("deck=%d baseline: computing %s TVD", deck_size, key)
-                baseline_metrics[key] = get_ngram_tvd(baseline_samples, n, skip=skip)
+        for spec in ngram_specs:
+            if spec.title not in baseline_metrics:
+                _logger.info("deck=%d baseline: computing %s TVD", deck_size, spec.title)
+                baseline_metrics[spec.title] = get_ngram_tvd(baseline_eps, spec.n, skip=spec.skip)
                 _ckpt_save_metrics(ds_ckpt, "baseline", baseline_metrics)
             else:
-                _logger.info("deck=%d baseline: %s TVD loaded from checkpoint", deck_size, key)
+                _logger.info("deck=%d baseline: %s TVD loaded from checkpoint", deck_size, spec.title)
 
         if lstm_settings is not None and "lstm_predictability" not in baseline_metrics:
             _logger.info("deck=%d baseline: computing LSTM predictability", deck_size)
             baseline_metrics["lstm_predictability"] = lstm_predictability(
-                baseline_samples, deck_size, lstm_settings, device
+                baseline_eps, deck_size, lstm_settings, device
             )
             _ckpt_save_metrics(ds_ckpt, "baseline", baseline_metrics)
         elif lstm_settings is not None:
             _logger.info("deck=%d baseline: LSTM predictability loaded from checkpoint", deck_size)
 
         baseline_pos = baseline_metrics["positional"]
-        baseline_ngram = {(n, skip): baseline_metrics[ngram_metric_name(n, skip)] for n, skip in ngram_pairs}
+        baseline_ngram = {spec: baseline_metrics[spec.title] for spec in ngram_specs}
         baseline_lstm_val = baseline_metrics.get("lstm_predictability")
 
         # --- Iterations ---
         pos_bp: int | None = None
-        ngram_bp: dict = {(n, skip): None for n, skip in ngram_pairs}
+        ngram_bp: dict = {spec: None for spec in ngram_specs}
         lstm_bp: int | None = None
 
-        samples = deck.unsqueeze(0).expand(num_samples, -1).clone()
+        episodes: np.ndarray = np.array([])
         for iteration in tqdm(range(1, max_iter + 1), desc="Iterations", leave=False):
             ckpt_name = f"pov_{iteration}"
-            episodes = _ckpt_load_episodes(ds_ckpt, ckpt_name)
-            if episodes is not None:
+
+            if loaded_episodes := _ckpt_load_episodes(ds_ckpt, ckpt_name):
                 _logger.info("deck=%d iter=%d: loaded episodes from checkpoint", deck_size, iteration)
-                samples = torch.tensor(episodes, dtype=dtype, device=device)
-                samples_np = episodes
+                episodes = loaded_episodes
             else:
-                _logger.info("deck=%d iter=%d: shuffling %d episodes", deck_size, iteration, num_samples)
-                for s in range(num_samples):
-                    shuffle(samples[s], iterations=1, seed=rng, options=cur_options)
-                samples_np = samples.cpu().numpy()
-                _ckpt_save_episodes(ds_ckpt, ckpt_name, samples_np)
+                if iteration == 1:
+                    _logger.info("deck=%d iter=%d: initializing episodes", deck_size, iteration)
+                    episodes = deck.unsqueeze(0).expand(num_episodes, -1).clone().cpu().numpy()
+                assert len(episodes), "Episodes are not initialized after the first iteration. This should never happen"
+
+                episodes_t = torch.as_tensor(episodes, dtype=dtype, device=device)
+                for s in range(num_episodes):
+                    shuffle(episodes_t[s], iterations=1, seed=rng, options=cur_options)
+                _ckpt_save_episodes(ds_ckpt, ckpt_name, episodes := episodes_t.cpu().numpy())  # noqa
 
             iter_metrics = _ckpt_load_metrics(ds_ckpt, ckpt_name) or {}
 
-            if pos_bp is None and "positional" not in iter_metrics:
-                _logger.info("deck=%d iter=%d: computing positional TVD", deck_size, iteration)
-                iter_metrics["positional"] = get_tvd(samples_np)
-                _ckpt_save_metrics(ds_ckpt, ckpt_name, iter_metrics)
-            elif pos_bp is None:
-                _logger.info("deck=%d iter=%d: positional TVD loaded from checkpoint", deck_size, iteration)
-            if (
-                pos_bp is None
-                and "positional" in iter_metrics
-                and iter_metrics["positional"] - baseline_pos < positional_tolerance
-            ):
-                pos_bp = iteration
-                _logger.info("deck=%d iter=%d: positional breaking point", deck_size, iteration)
-
-            for n, skip in ngram_pairs:
-                key = ngram_metric_name(n, skip)
-                if ngram_bp[(n, skip)] is None and key not in iter_metrics:
-                    _logger.info("deck=%d iter=%d: computing %s TVD", deck_size, iteration, key)
-                    iter_metrics[key] = get_ngram_tvd(samples_np, n, skip=skip)
+            if pos_bp is None:
+                if (pos_tvd := iter_metrics.get("positional")) is not None:
+                    _logger.info("deck=%d iter=%d: positional TVD loaded from checkpoint", deck_size, iteration)
+                else:
+                    _logger.info("deck=%d iter=%d: computing positional TVD", deck_size, iteration)
+                    iter_metrics["positional"] = pos_tvd = get_tvd(episodes)
                     _ckpt_save_metrics(ds_ckpt, ckpt_name, iter_metrics)
-                elif ngram_bp[(n, skip)] is None:
-                    _logger.info("deck=%d iter=%d: %s TVD loaded from checkpoint", deck_size, iteration, key)
-                if (
-                    ngram_bp[(n, skip)] is None
-                    and key in iter_metrics
-                    and iter_metrics[key] - baseline_ngram[(n, skip)] < ngram_tolerances.get(n, default_ngram_tolerance)
-                ):
-                    ngram_bp[(n, skip)] = iteration
-                    _logger.info("deck=%d iter=%d: %s breaking point", deck_size, iteration, key)
 
-            if lstm_settings is not None and lstm_bp is None and "lstm_predictability" not in iter_metrics:
-                _logger.info("deck=%d iter=%d: computing LSTM predictability", deck_size, iteration)
-                iter_metrics["lstm_predictability"] = lstm_predictability(samples_np, deck_size, lstm_settings, device)
-                _ckpt_save_metrics(ds_ckpt, ckpt_name, iter_metrics)
-            elif lstm_settings is not None and lstm_bp is None:
-                _logger.info("deck=%d iter=%d: LSTM predictability loaded from checkpoint", deck_size, iteration)
-            if (
-                lstm_settings is not None
-                and lstm_bp is None
-                and "lstm_predictability" in iter_metrics
-                and iter_metrics["lstm_predictability"] - baseline_lstm_val < lstm_tolerance
-            ):
-                lstm_bp = iteration
-                _logger.info("deck=%d iter=%d: LSTM breaking point", deck_size, iteration)
+                if pos_tvd - baseline_pos < positional_tolerance:
+                    pos_bp = iteration
+                    _logger.info("deck=%d iter=%d: positional breaking point", deck_size, iteration)
 
-            tvd_converged = pos_bp is not None and all(v is not None for v in ngram_bp.values())
+            for spec in ngram_specs:
+                if ngram_bp[spec] is None:
+                    if (ngram_tvd := iter_metrics.get(spec.title)) is not None:
+                        _logger.info("deck=%d iter=%d: %s TVD loaded from checkpoint", deck_size, iteration, spec.title)
+                    else:
+                        _logger.info("deck=%d iter=%d: computing %s TVD", deck_size, iteration, spec.title)
+                        iter_metrics[spec.title] = ngram_tvd = get_ngram_tvd(episodes, spec.n, skip=spec.skip)
+                        _ckpt_save_metrics(ds_ckpt, ckpt_name, iter_metrics)
+
+                    if ngram_tvd - baseline_ngram[spec] < ngram_tolerances.get(spec.n, default_ngram_tolerance):
+                        ngram_bp[spec] = iteration
+                        _logger.info("deck=%d iter=%d: %s breaking point", deck_size, iteration, spec.title)
+
+            if lstm_settings is not None and lstm_bp is None:
+                if (lstm_pred := iter_metrics.get("lstm_predictability")) is not None:
+                    _logger.info("deck=%d iter=%d: LSTM predictability loaded from checkpoint", deck_size, iteration)
+                else:
+                    _logger.info("deck=%d iter=%d: computing LSTM predictability", deck_size, iteration)
+                    iter_metrics["lstm_predictability"] = lstm_pred = lstm_predictability(
+                        episodes, deck_size, lstm_settings, device
+                    )
+                    _ckpt_save_metrics(ds_ckpt, ckpt_name, iter_metrics)
+
+                if lstm_pred - baseline_lstm_val < lstm_tolerance:
+                    lstm_bp = iteration
+                    _logger.info("deck=%d iter=%d: LSTM breaking point", deck_size, iteration)
+
+            tvd_converged = pos_bp is not None and all(ngram_bp.values())
             lstm_converged = lstm_settings is None or lstm_bp is not None
             if tvd_converged and lstm_converged:
                 break
+        else:
+            result.non_convergences = [
+                *(["positional"] if pos_bp is None else []),
+                *[spec.title for spec, bp in ngram_bp.items() if bp is None],
+                *(["lstm_predictability"] if lstm_settings is not None and lstm_bp is None else []),
+            ]
 
-        positional_bps[deck_size] = pos_bp
-        ngram_bps[deck_size] = ngram_bp
-        if lstm_bps is not None:
-            lstm_bps[deck_size] = lstm_bp
-        deficits_out[deck_size] = {
-            "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
-            **{
-                ngram_metric_name(n, skip): get_sample_deficit(
-                    num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n)
-                )
-                for n, skip in ngram_pairs
-            },
-        }
+        result.positional_breaking_point = pos_bp
+        result.ngram_breaking_points = ngram_bp
+        if lstm_settings is not None:
+            result.lstm_breaking_point = lstm_bp
 
-    return BreakingPointPerDeckSizeResult(
-        options=options_out,
-        positional_breaking_points=positional_bps,
-        ngram_breaking_points=ngram_bps,
-        sample_deficits=deficits_out,
-        lstm_breaking_points=lstm_bps,
-    )
+    return final_result
 
 
 def _ckpt_load_episodes(ds_ckpt: Path | None, name: str) -> np.ndarray | None:
     if ds_ckpt is None:
         return None
-    d = ds_ckpt / name
-    npy = d / "episodes.npy"
-    if npy.exists():
-        return np.load(npy)
-    npz = d / "episodes.npz"
-    return np.load(npz)["arr_0"] if npz.exists() else None
+    npy = ds_ckpt / name / "episodes.npy"
+    return np.load(npy) if npy.exists() else None
 
 
 def _ckpt_save_episodes(ds_ckpt: Path | None, name: str, episodes: np.ndarray) -> None:
     if ds_ckpt is None:
         return
-    d = ds_ckpt / name
-    d.mkdir(parents=True, exist_ok=True)
-    # np.save is much faster than np.savez_compressed for near-random data (permutations
-    # compress poorly, so zlib burns CPU cycles for minimal size reduction)
+    (d := ds_ckpt / name).mkdir(parents=True, exist_ok=True)
     np.save(d / "episodes.npy", episodes)
 
 
@@ -342,20 +333,22 @@ def _ckpt_load_metrics(ds_ckpt: Path | None, name: str) -> dict | None:
 def _ckpt_save_metrics(ds_ckpt: Path | None, name: str, metrics: dict) -> None:
     if ds_ckpt is None:
         return
-    d = ds_ckpt / name
-    d.mkdir(parents=True, exist_ok=True)
+    (d := ds_ckpt / name).mkdir(parents=True, exist_ok=True)
     (d / "metrics.json").write_text(json.dumps(metrics))
 
 
 class BiasPerIterResult(NamedTuple):
     options: FullOptions  # options after inference for dataset
-    tvds: np.ndarray  # shape (max_iterations,)
-    baseline_tvd: float
-    ngram_tvds: np.ndarray  # shape (max_iterations, len(ngram_degrees))
-    baseline_ngram_tvds: np.ndarray  # shape (len(ngram_degrees),)
-    sample_deficits: dict  # metric_name -> int
+    sample_deficits: dict[str, int]  # metric_name -> int
+
+    baseline_pos_tvd: float
+    pos_tvds: np.ndarray  # shape (max_iterations,)
+
+    baseline_ngram_tvds: np.ndarray  # shape (len(ngrams_specs),)
+    ngram_tvds: np.ndarray  # shape (max_iterations, len(ngrams_specs))
+
+    baseline_lstm_predictability: float | None = None
     lstm_predictabilities: np.ndarray | None = None  # shape (max_iterations,)
-    baseline_lstm_predictabilities: float | None = None
 
 
 def bias_per_iteration(
@@ -364,8 +357,7 @@ def bias_per_iteration(
     max_iterations: int,
     options: Options | None,
     rng: np.random.Generator,
-    ngram_degrees: list[int],
-    ngram_skips: list[int],
+    ngram_specs: list[NgramSpec],
     dtype: torch.dtype,
     device: str,
     lstm_settings: LSTMSettings | None = None,
@@ -377,19 +369,17 @@ def bias_per_iteration(
     :param max_iterations: Test between 1 and max iterations (inclusive).
     :param options: POV Shuffle algorithm options.
     :param rng: Random number generator for reproducibility.
-    :param ngram_degrees: N-gram degrees for which to compute TVD at each iteration.
-    :param ngram_skips: Skip values paired with ``ngram_degrees``; ``0`` means adjacent elements.
+    :param ngram_specs: N-gram degrees to measure TVD, optionally with skip values to define skip-grams.
     :param dtype: Torch dtype for the deck tensor.
     :param device: Torch device on which to allocate and shuffle the deck tensor.
     :param lstm_settings: If provided, trains an LSTM to measure RTD predictability using the
         context window size from ``settings.context_length``.
     """
-    ngram_pairs = list(zip(ngram_degrees, ngram_skips))
     deck = torch.arange(deck_size, dtype=dtype, device=device)
     options = optim_options_for_dataset(deck, options)
 
     tvds = np.zeros(max_iterations, dtype=float)
-    ngram_tvds = np.zeros((max_iterations, len(ngram_pairs)), dtype=float)
+    ngram_tvds = np.zeros((max_iterations, len(ngram_specs)), dtype=float)
     lstm_pred = np.zeros(max_iterations) if lstm_settings is not None else None
 
     # Initialize samples and determine the TVD of the POV Shuffle after each iteration
@@ -399,8 +389,8 @@ def bias_per_iteration(
             shuffle(samples[sample_id], iterations=1, seed=rng, options=options)
         samples_np = samples.cpu().numpy()
         tvds[i] = get_tvd(samples_np)
-        ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
-        if lstm_settings is not None:
+        ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_specs])
+        if lstm_settings is not None and lstm_pred is not None:
             lstm_pred[i] = lstm_predictability(samples_np, deck_size, lstm_settings, device)
 
     # Re-initialize samples and determine the TVD of a perfect shuffle (baseline)
@@ -408,28 +398,26 @@ def bias_per_iteration(
     for sample_id in tqdm(range(num_samples), desc="Samples (baseline)"):
         rng.shuffle(samples_np[sample_id])
     baseline_tvd = get_tvd(samples_np)
-    baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
+    baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_specs])
     baseline_lstm = (
         lstm_predictability(samples_np, deck_size, lstm_settings, device) if lstm_settings is not None else None
     )
 
     sample_deficits = {
-        "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
+        "positional": get_sample_deficit(num_samples, deck_size, get_pos_tvd_event_space(deck_size)),
         **{
-            ngram_metric_name(n, skip): get_sample_deficit(
-                num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n)
-            )
-            for n, skip in ngram_pairs
+            spec.title: get_sample_deficit(num_samples, deck_size, get_ngram_tvd_event_space(deck_size, spec.n))
+            for spec in ngram_specs
         },
     }
 
     return BiasPerIterResult(
-        tvds=tvds,
-        baseline_tvd=baseline_tvd,
+        pos_tvds=tvds,
+        baseline_pos_tvd=baseline_tvd,
         ngram_tvds=ngram_tvds,
         baseline_ngram_tvds=baseline_ngram_tvds,
         options=options,
         sample_deficits=sample_deficits,
         lstm_predictabilities=lstm_pred,
-        baseline_lstm_predictabilities=baseline_lstm,
+        baseline_lstm_predictability=baseline_lstm,
     )

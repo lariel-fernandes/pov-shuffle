@@ -1,70 +1,93 @@
-from math import perm as _perm
+import math
 
 import numpy as np
 
 
-def get_tvd_num_valid(deck_size: int) -> int:
+def get_worker_data_scan_per_iter(vblock_size: int, pblock_size: int, deck_size: int) -> float:
+    """Proportion of instances exposed to each parallel worker (e.g. GPU thread block) in each shuffle iteration."""
+    return (vblock_size * pblock_size) / deck_size
+
+
+def get_cumulative_worker_exposure(worker_data_scan_per_iter: float, iterations: int) -> list[float]:
+    """Cumulative proportion of instances exposed per parallel worker (e.g. GPU thread block) after each shuffle iteration."""
+    return [(i + 1) * worker_data_scan_per_iter for i in range(0, iterations)]
+
+
+def get_pos_tvd_event_space(deck_size: int) -> int:
     """Number of valid events for positional TVD: one travel-distance value per deck position."""
     return deck_size
 
 
-def get_ngram_tvd_num_valid(deck_size: int, n: int) -> int:
-    """Number of valid events for n-gram TVD: ordered selections of n-1 distinct values from {1,...,deck_size-1}."""
-    return _perm(deck_size - 1, n - 1)
+def get_ngram_tvd_event_space(deck_size: int, n: int) -> int:
+    """Number of valid events for n-gram TVD: tuples of n-1 relative travel distances to the n-gram anchor.
+
+    Distances are modulo deck_size, so ranging from 1 to deck_size-1"""
+    return math.perm(deck_size - 1, n - 1)
 
 
-def get_sample_deficit(num_samples: int, deck_size: int, num_valid: int) -> int:
+def get_sample_deficit(num_episodes: int, deck_size: int, event_space: int) -> int:
     """Signed gap between the event space and the observation budget.
 
-    :returns: ``num_valid - num_samples * deck_size``. Positive means undersampled (more observations
+    :returns: ``event_space - num_episodes * deck_size``. Positive means undersampled (more observations
               would be needed to cover all valid events at least once). Zero means exactly covered.
               Negative means oversampled (surplus observations).
     """
-    return num_valid - num_samples * deck_size
+    return event_space - num_episodes * deck_size
 
 
-def get_tvd(samples: np.ndarray) -> float:
+def get_tvd(episodes: np.ndarray) -> float:
     """Mean per-position Total Variation Distance via the travel-distance distribution.
 
-    For each element in each sample, the travel distance is ``t = (dest_position - src_value) % deck_size``.
+    For each element in each episode, the travel distance is ``t = (dest_position - src_value) % deck_size``.
     In a truly uniform shuffle each travel distance is equally likely, so the reference distribution
     is uniform over ``{0, ..., deck_size - 1}``.
 
     **Adaptive TVD formula**::
 
-        total     = num_samples * deck_size   # total observations
-        num_valid = deck_size                 # number of valid events
-        p_ref     = 1 / min(total, num_valid)
+        num_observations = num_episodes * deck_size  # total observations
+        event_space      = deck_size                 # number of valid events
+        p_ref            = 1 / min(num_observations, event_space)
 
-        TVD = 0.5 * [ sum_observed |count/total - p_ref|
-                    + (min(total, num_valid) - num_observed) * p_ref ]
+        TVD = 0.5 * [ sum_observed |td_counts / num_observations - p_ref|
+                    + (min(num_observations, event_space) - num_observed) * p_ref ]
 
-    Since ``total = num_samples * deck_size >= deck_size = num_valid`` for any ``num_samples >= 1``,
+    Since ``num_observations = num_episodes * deck_size >= deck_size = event_space`` for any ``num_episodes >= 1``,
     this metric is always in the oversampled regime and reduces to the standard TVD of the
     travel-distance distribution against uniform.
 
-    :param samples: Array of shape ``(num_samples, deck_size)`` containing independent permutations.
+    :param episodes: Array of shape ``(num_episodes, deck_size)`` containing independent permutations.
                     Values must be the monotonically increasing indices ``0`` to ``deck_size - 1``.
     """
-    num_samples, deck_size = samples.shape
-    total = int(num_samples) * deck_size
-    num_valid = deck_size
-    p_ref = 1.0 / min(total, num_valid)
+    num_episodes, deck_size = episodes.shape
+    num_observations = int(num_episodes) * deck_size
+    event_space = get_pos_tvd_event_space(deck_size)
+    p_ref = 1.0 / min(num_observations, event_space)  # Reference event probability
 
-    # Process in batches: avoid allocating (num_samples * deck_size,) in one shot.
+    num_tds_per_episode = deck_size  # Observed travel distances per shuffling episode
+    td_bytes = 8  # Travel distance is int64
+    peak_bytes_per_episode = num_tds_per_episode * td_bytes  # Bytes for storing travel distances of each episode
+
+    # Process in batches: avoid allocating (num_episodes * deck_size,) in one shot.
     _MAX_BYTES = 256 * 1024 * 1024  # 256 MB cap for the (batch, deck_size) int64 array
-    batch_size = max(1, _MAX_BYTES // (deck_size * 8))
-    arange = np.arange(deck_size, dtype=np.int64)
-    counts = np.zeros(deck_size, dtype=np.int64)
-    for start in range(0, num_samples, batch_size):
-        batch = samples[start : start + batch_size].astype(np.int64)  # (b, deck_size)
-        tds = (arange - batch) % deck_size  # (b, deck_size), broadcast
-        counts += np.bincount(tds.ravel(), minlength=deck_size)
+    max_episodes_per_batch = max(1, _MAX_BYTES // peak_bytes_per_episode)
+
+    indices = np.arange(deck_size, dtype=np.int64)  # Identity array for determining travel distances
+    td_counts = np.zeros(deck_size, dtype=np.int64)  # Travel distance event counts
+
+    for start in range(0, num_episodes, max_episodes_per_batch):
+        batch_episodes = episodes[start : start + max_episodes_per_batch].astype(np.int64)  # (batch_size, deck_size)
+
+        # Because the deck itself is an identity array, the travel distance of each element after shuffling is simply
+        # the difference between its value (original index) and the index where it landed (aligned value in `indices`).
+        distances = (indices - batch_episodes) % deck_size  # (batch_size, deck_size), broadcast subtraction
+        td_counts += np.bincount(distances.ravel(), minlength=deck_size)
+
     # bincount fills zeros for unobserved distances, so the sum already covers the full event space
-    return float(0.5 * np.abs(counts / total - p_ref).sum())
+    p_obs = td_counts / num_observations  # Observed travel distance probabilities
+    return float(np.abs(p_obs - p_ref).sum() / 2)
 
 
-def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
+def get_ngram_tvd(episodes: np.ndarray, n: int, skip: int = 0) -> float:
     """TVD of the n-gram relative-travel-distance distribution against uniform.
 
     For each n-gram of observed values ``(v_0, ..., v_{n-1})`` at positions spaced ``skip+1`` apart
@@ -75,112 +98,154 @@ def get_ngram_tvd(samples: np.ndarray, n: int, skip: int = 0) -> float:
 
     Valid events are all tuples where the underlying value differences
     ``(v_k - v_0) mod N`` form an ordered selection of ``n-1`` distinct non-zero values from
-    ``{1, ..., N-1}``, giving ``num_valid = P(N-1, n-1)`` equally-likely outcomes under a uniform
+    ``{1, ..., N-1}``, giving ``event_space = P(N-1, n-1)`` equally-likely outcomes under a uniform
     shuffle. This count is the same for all values of ``skip``.
 
     **Adaptive TVD formula**::
 
-        total     = num_samples * deck_size
-        num_valid = P(deck_size - 1, n - 1)
-        p_ref     = 1 / min(total, num_valid)
+        num_observations = num_episodes * deck_size
+        event_space      = P(deck_size - 1, n - 1)
+        p_ref            = 1 / min(num_observations, event_space)
 
-        TVD = 0.5 * [ sum_observed |count/total - p_ref|
-                    + (min(total, num_valid) - num_observed) * p_ref ]
+        TVD = 0.5 * [ sum_observed |key_counts / num_observations - p_ref|
+                    + (min(num_observations, event_space) - num_distinct_observed_events) * p_ref ]
 
     Observed events are counted sparsely (no enumeration of all valid tuples), so the unobserved
     contribution is computed analytically. Episodes are processed in batches to keep peak memory
-    proportional to ``batch_size * deck_size * n`` rather than ``num_samples * deck_size * n``.
+    proportional to ``batch_size * deck_size * n`` rather than ``num_episodes * deck_size * n``.
 
     **Sampling regimes**:
 
-    - ``n = 2``: ``num_valid = deck_size - 1``, ``total / num_valid ≈ num_samples``. Always
-      oversampled for reasonable ``num_samples``; reduces to standard TVD.
-    - ``n = 3``: ``num_valid ≈ deck_size²``. Undersampled when ``num_samples < deck_size``.
-      In that regime ``p_ref = 1 / total``, so a perfectly uniform shuffler scores TVD ≈ 0
-      (unobserved events are not penalised beyond the sample budget), while a biased shuffler
+    - ``n = 2``: ``event_space = deck_size - 1``, ``num_observations / event_space ≈ num_episodes``. Always
+      oversampled for reasonable ``num_episodes``; reduces to standard TVD.
+    - ``n = 3``: ``event_space ≈ deck_size²``. Undersampled when ``num_episodes < deck_size``.
+      In that regime ``p_ref = 1 / num_observations``, so a perfectly uniform shuffler scores TVD ≈ 0
+      (unobserved events are not penalized beyond the sample budget), while a biased shuffler
       that revisits patterns scores higher because it observes fewer distinct events.
 
-    :param samples: Array of shape ``(num_samples, deck_size)`` containing independent permutations.
+    :param episodes: Array of shape ``(num_episodes, deck_size)`` containing independent permutations.
     :param n: Degree of the n-gram.
     :param skip: Number of positions skipped between consecutive n-gram elements.
                  ``0`` (default) means adjacent elements; ``1`` means every other element, etc.
     """
-    num_samples, deck_size = samples.shape
-    total = num_samples * deck_size
-    num_valid = _perm(deck_size - 1, n - 1)
-    p_ref = 1.0 / min(total, num_valid)
+    rtd_tup_size = n - 1  # Each tuple of relative travel distances from n-gram anchor to n-gram items has size n - 1
+    rtd_bytes = 8  # Relative travel distances are represented as int64
 
+    num_episodes, deck_size = episodes.shape
+    num_observations = num_episodes * deck_size
+    event_space = get_ngram_tvd_event_space(deck_size, n)
+    p_ref = 1.0 / min(num_observations, event_space)  # Reference event probability
+
+    # Sampling step between n-gram items
+    # For skip=0 (not a skip-gram), the step is 1 (adjacent items). For skip=1, the step is 2 (every other item), etc.
     step = skip + 1
-    col_indices = np.arange(deck_size).reshape(deck_size, 1) + np.arange(0, n * step, step).reshape(1, n)
+
+    # After-shuffle distances between each ngram item and the anchor: 0 for the anchor itself and k*step for other items
+    # E.g.: for n=3 and skip=1 (i.e. step=2): [0, 2, 4]
+    ngram_steps = np.arange(0, n * step, step)
+
+    # Indexer with shape (deck_size, n) for selecting `deck_size` n-grams of size n
+    # E.g. for n=2 and skip=0: [[0, 1], [1, 2], [2, 3], ...]
+    ngrams_indexer = np.arange(deck_size).reshape(deck_size, 1) + ngram_steps.reshape(1, n)
 
     # Batch over episodes to cap the (batch_size, deck_size, n) intermediate arrays
     _MAX_BYTES = 256 * 1024 * 1024  # 256 MB
-    bytes_per_episode = deck_size * max(n * samples.itemsize, (n - 1) * 8)
-    batch_size = max(1, _MAX_BYTES // bytes_per_episode)
 
     if n == 2:
         # n=2: RTDs are scalars; accumulate bincount across batches
-        excluded = (deck_size - skip - 1) % deck_size
-        counts = np.zeros(deck_size, dtype=np.int64)
-        for start in range(0, num_samples, batch_size):
-            batch = samples[start : start + batch_size]
-            ngrams = batch.take(col_indices, axis=1, mode="wrap")  # (b, deck_size, 2)
-            rtds = _relative_travel_distances(ngrams, skip)  # (b, deck_size, 1)
-            del ngrams
-            counts += np.bincount((rtds % deck_size).ravel().astype(np.int64), minlength=deck_size)
-        counts = np.delete(counts, excluded)
-        return float(0.5 * np.abs(counts / total - p_ref).sum())
-    else:
-        # n>2: encode RTD tuples as int64 keys.
-        # Two memory concerns:
-        #   1. Intermediate (batch, pos, n) arrays: already bounded by _MAX_BYTES via batch_size.
-        #   2. The final keys array: total = num_samples * deck_size int64 values, which for
-        #      large decks can reach several GB and then np.unique needs a second sorted copy.
-        #      Cap it by subsampling positions — the metric is already undersampled at large
-        #      deck sizes so the estimate is statistically equivalent.
-        _MAX_KEY_BYTES = 512 * 1024 * 1024  # 512 MB for the pre-allocated keys array
-        max_keys = _MAX_KEY_BYTES // 8
-        if total > max_keys:
-            pos_per_sample = max(1, max_keys // num_samples)
-            sampled_pos = np.sort(np.random.choice(deck_size, pos_per_sample, replace=False))
-            step_offsets = np.arange(0, n * step, step)
-            eff_col_indices = (sampled_pos.reshape(-1, 1) + step_offsets.reshape(1, n)) % deck_size
-            effective_total = num_samples * pos_per_sample
-        else:
-            eff_col_indices = col_indices
-            pos_per_sample = deck_size
-            effective_total = total
-        # Recompute p_ref against the actual observation count after subsampling
-        p_ref = 1.0 / min(effective_total, num_valid)
+        key_counts = np.zeros(deck_size, dtype=np.int64)
 
-        # Rebatch based on (possibly smaller) pos_per_sample, then pre-allocate the key array.
-        # Pre-allocation (vs accumulating a list + concatenating) avoids the 2x memory spike
-        # from holding both the list and the concatenated result simultaneously.
-        bytes_per_ep = pos_per_sample * max(n * samples.itemsize, (n - 1) * 8)
-        ep_batch = max(1, _MAX_BYTES // bytes_per_ep)
+        # v_0 and v_1 can't be the same instance.
+        # Plugging v_1=v_0 and k=1 (one n-gram step) in the RTD formula gives:
+        # (dist_before - dist_after) % deck = (v_1 - v_0 - k * step) % deck = (0 - 1 * step) % deck
+        excluded_rtd = (-step) % deck_size
+
+        # Determine batch_size to respect _MAX_BYTES
+        ngrams_mem_peak = deck_size * n * episodes.itemsize
+        rtds_mem_peak = deck_size * rtd_tup_size * rtd_bytes
+        peak_bytes_per_episode = max(ngrams_mem_peak, rtds_mem_peak)  # use the worst of the two mem peaks
+        max_episodes_per_batch = max(1, _MAX_BYTES // peak_bytes_per_episode)
+
+        for start in range(0, num_episodes, max_episodes_per_batch):
+            episodes_batch = episodes[start : start + max_episodes_per_batch]
+            ngrams = episodes_batch.take(ngrams_indexer, axis=1, mode="wrap")  # (batch_size, deck_size, 2)
+            rtds = _relative_travel_distances(ngrams, skip)  # (batch_size, deck_size, 1)
+            del ngrams
+            key_counts += np.bincount((rtds % deck_size).ravel().astype(np.int64), minlength=deck_size)
+
+        key_counts = np.delete(key_counts, excluded_rtd)
+        p_obs = key_counts / num_observations  # Observed RTD probabilities
+        return float(1 / 2 * np.abs(p_obs - p_ref).sum())
+    else:
+        # n>2: encode RTD tuples as int64 keys using a bijection that interprets each tuple as an integer in the base `deck_size`
+        # E.g.: deck_size=10, n=4: bijection(rtd_1, rtd_2, rtd_3) = rtd_1 * 10^2 + rtd_2 * 10^1 + rtd_3 * 10^0
         powers = np.array([deck_size**i for i in range(n - 2, -1, -1)], dtype=np.int64)
-        all_keys = np.empty(effective_total, dtype=np.int64)
-        offset = 0
-        for start in range(0, num_samples, ep_batch):
-            batch = samples[start : start + ep_batch]
-            b = len(batch)
-            chunk = b * pos_per_sample
-            ngrams = batch.take(eff_col_indices, axis=1, mode="wrap")  # (b, pos_per_sample, n)
+
+        # Determine how many distinct keys can be stored in memory at once. In the worst case, every observed n-gram
+        # has a distinct RTD tuple, therefore a distinct key, so effectively this is a cap on the observation budget.
+        key_bytes = 8  # Each key is represented as int64
+        _MAX_KEYS_BYTES = 512 * 1024 * 1024  # Limit keys storage to 512 MB (RAM)
+        max_keys = _MAX_KEYS_BYTES // key_bytes
+
+        if num_observations > max_keys:
+            num_ngrams_per_episode = max(1, max_keys // num_episodes)
+            ngram_positions = np.sort(np.random.choice(deck_size, num_ngrams_per_episode, replace=False))
+            effective_ngrams_indexer = (ngram_positions.reshape(-1, 1) + ngram_steps.reshape(1, n)) % deck_size
+            effective_num_observations = num_episodes * num_ngrams_per_episode
+        else:
+            effective_ngrams_indexer = ngrams_indexer
+            num_ngrams_per_episode = deck_size
+            effective_num_observations = num_observations
+
+        # Recompute p_ref against the actual observation count after subsampling
+        p_ref = 1.0 / min(effective_num_observations, event_space)
+
+        # Determine batch_size in number of episodes to respect _MAX_BYTES
+        ngrams_mem_peak = num_ngrams_per_episode * n * episodes.itemsize
+        rtds_mem_peak = num_ngrams_per_episode * rtd_tup_size * rtd_bytes
+        peak_bytes_per_episode = max(ngrams_mem_peak, rtds_mem_peak)  # use the worst of the two mem peaks
+        max_episodes_per_batch = max(1, _MAX_BYTES // peak_bytes_per_episode)
+
+        # Rebatch based on (possibly smaller) ngrams_per_episode, then pre-allocate the key array.
+        all_keys = np.empty(effective_num_observations, dtype=np.int64)
+        keys_offset = 0
+        for start in range(0, num_episodes, max_episodes_per_batch):
+            # Sample episodes batch
+            episodes_batch = episodes[start : start + max_episodes_per_batch]
+            num_episodes_in_batch = len(episodes_batch)
+            num_ngrams_in_batch = num_episodes_in_batch * num_ngrams_per_episode
+
+            # (num_episodes_in_batch, num_ngrams_per_episode, n)
+            ngrams = episodes_batch.take(effective_ngrams_indexer, axis=1, mode="wrap")
+
+            # (num_episodes_in_batch, num_ngrams_per_episode, n - 1)
             rtds = _relative_travel_distances(ngrams, skip)
             del ngrams
+
+            # (num_ngrams_in_batch, n - 1)
             flat_rtds = (rtds % deck_size).reshape(-1, n - 1).astype(np.int64)
             del rtds
-            all_keys[offset : offset + chunk] = flat_rtds @ powers
-            del flat_rtds
-            offset += chunk
 
-        _, counts = np.unique(all_keys, return_counts=True)
+            # Scalar product broadcast: (num_ngrams_in_batch, n - 1) @ (n - 1,) = (num_ngrams_in_batch,)
+            # Every RTD tuple of size n - 1 is combined with the powers for the `deck_size` base, resulting in the bijection:
+            # int64_key = rtd_0 * deck^(n - 2) + ... + rtd_i * deck^(n - 2 - i) + ... rtd_{n - 2} * deck^0
+            all_keys[keys_offset : keys_offset + num_ngrams_in_batch] = flat_rtds @ powers
+            del flat_rtds
+
+            keys_offset += num_ngrams_in_batch
+
+        _, key_counts = np.unique(all_keys, return_counts=True)
         del all_keys
-        num_observed = len(counts)
-        # np.unique only returns non-zero counts; add unobserved contribution analytically
-        observed = float(0.5 * np.sum(np.abs(counts / effective_total - p_ref)))
-        unobserved = 0.5 * (min(effective_total, num_valid) - num_observed) * p_ref
-        return observed + unobserved
+
+        num_distinct_observed_events = len(key_counts)
+        p_obs = key_counts / effective_num_observations  # Observed probabilities for event keys
+        del key_counts
+
+        # Number of distinct unobserved events, capped by the observation budget
+        num_missing_events = min(event_space, effective_num_observations) - num_distinct_observed_events
+
+        # Adaptive TVD with contribution of unobserved events
+        return float(1 / 2 * (num_missing_events * p_ref + np.sum(np.abs(p_obs - p_ref))))
 
 
 def _relative_travel_distances(ngrams: np.ndarray, skip: int = 0) -> np.ndarray:
@@ -205,6 +270,12 @@ def _relative_travel_distances(ngrams: np.ndarray, skip: int = 0) -> np.ndarray:
     """
     n = ngrams.shape[-1]
     step = skip + 1
-    expected = step * np.arange(1, n, dtype=np.int64)
-    diffs = ngrams[..., 1:].astype(np.int64) - ngrams[..., :1].astype(np.int64)
-    return diffs - expected
+
+    # n - 1 distances to n-gram anchor after shuffling
+    dist_after = step * np.arange(1, n, dtype=np.int64)
+
+    # n - 1 distances to n-gram anchor before shuffling
+    # Assuming deck is an identity array, distances before can be obtained by subtracting elements.
+    dist_before = ngrams[..., 1:].astype(np.int64) - ngrams[..., :1].astype(np.int64)
+
+    return dist_before - dist_after

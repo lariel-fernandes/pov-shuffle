@@ -3,22 +3,22 @@ from typing import NamedTuple
 from povs import Options
 
 from .lstm import LSTMSettings
+from .types import NgramSpec
 
 
 class BreakingPointParams(NamedTuple):
     """Breaking point per deck size experiment parameters.
 
     - `seed`: RNG seed for reproducibility.
-    - `num_samples`: Number of independent shuffles sampled to estimate the output distribution.
+    - `num_episodes`: Number of independent shuffles sampled to estimate the output distribution.
     - `deck_sizes`: Deck sizes to test, in ascending order.
-    - `ngram_degrees`: N-gram degrees for which bias convergence is measured.
-    - `ngram_skips`: Number of positions skipped between n-gram elements, one per entry in `ngram_degrees`.
+    - `ngram_specs`: N-gram degrees for which TVD was measured, optionally with skip values to define skip-grams.
     - `positional_tolerance`: Convergence threshold for positional TVD: ``tvd_pov - tvd_baseline < tolerance``.
     - `ngram_tolerances`: Per-degree convergence thresholds, keyed by n-gram degree.
     - `default_ngram_tolerance`: Fallback threshold for n-gram degrees absent from ``ngram_tolerances``.
     - `max_iterations_per_deck_size`: Hard iteration cap per deck size, keyed by deck size.
     - `default_max_iterations`: Fallback cap for deck sizes absent from ``max_iterations_per_deck_size``.
-    - `povs_options_per_deck_size`: POV Shuffle options per deck size; replaced with optimised ``FullOptions``
+    - `povs_options_per_deck_size`: POV Shuffle options per deck size; replaced with optimized ``FullOptions``
       in the report.
     - `default_options`: Default POV Shuffle options for deck sizes without specific options.
     - `dtype`: Torch dtype name for the deck tensor (e.g. ``"int32"``, ``"int64"``).
@@ -29,10 +29,9 @@ class BreakingPointParams(NamedTuple):
     """
 
     seed: int
-    num_samples: int
+    num_episodes: int
     deck_sizes: list[int]
-    ngram_degrees: list[int]
-    ngram_skips: list[int]
+    ngram_specs: list[NgramSpec]
     positional_tolerance: float
     ngram_tolerances: dict[int, float]
     default_ngram_tolerance: float
@@ -79,22 +78,19 @@ class BiasPerIterParams(NamedTuple):
 
     - `seed`: RNG seed for reproducibility.
     - `deck_size`: Number of elements in the deck (dataset size proxy).
-    - `num_samples`: Number of independent shuffles sampled to estimate the output distribution.
+    - `num_episodes`: Number of independent shuffles sampled to estimate the output distribution.
     - `max_iterations`: Number of shuffle iterations tested (from 1 to this value, inclusive).
     - `povs_options`: POV Shuffle algorithm options used in this run.
-    - `ngram_degrees`: N-gram degrees for which TVD was measured.
-    - `ngram_skips`: Number of positions skipped between n-gram elements, one per entry in `ngram_degrees`.
-                     ``0`` means adjacent elements (standard n-gram); positive values produce skip-grams.
+    - `ngram_specs`: N-gram degrees for which TVD was measured, optionally with skip values to define skip-grams.
     - `dtype`: Torch dtype name for the deck tensor (e.g. ``"int32"``, ``"int64"``).
     - `device`: Torch device on which the deck tensor lives and is shuffled (e.g. ``"cpu"``, ``"cuda"``).
     """
 
     seed: int
-    num_samples: int
+    num_episodes: int
     deck_size: int
     max_iterations: int
-    ngram_degrees: list[int]
-    ngram_skips: list[int]
+    ngram_specs: list[NgramSpec]
     povs_options: Options | None
     dtype: str
     device: str
