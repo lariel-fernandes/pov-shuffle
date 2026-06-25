@@ -192,8 +192,8 @@ class BuildExtension(torch.utils.cpp_extension.BuildExtension):
             "pblock_sizes":             build_options.POVS_CUDA_PBLOCK_SIZES,
             "instance_sizes":           build_options.POVS_CUDA_INSTANCE_SIZES,
             "cartesian_instancing":     build_options.POVS_CUDA_CARTESIAN_INSTANCING,
-            "instantiations":           [list(t) for t in build_options.POVS_CUDA_INSTANTIATIONS] if build_options.POVS_CUDA_INSTANTIATIONS else None,
-            "instantiations_all_types": [list(t) for t in build_options.POVS_CUDA_INSTANTIATIONS_ALL_TYPES] if build_options.POVS_CUDA_INSTANTIATIONS_ALL_TYPES else None,
+            "instantiations":           [list(t) for t in build_options.POVS_CUDA_INSTANTIATIONS],
+            "instantiations_all_types": [list(t) for t in build_options.POVS_CUDA_INSTANTIATIONS_ALL_TYPES],
         }))
 
         super().run()

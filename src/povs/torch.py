@@ -1,8 +1,9 @@
+import typing
 import warnings
 
 import torch
 
-from .common import choose_offsets, get_dtype_bytes, get_instance_size, povs_preflight
+from .common import choose_offsets, get_dtype_bytes, get_instance_size, povs_preflight, purge_dependent_param
 from .constants import (
     CUDA_CC_IDEAL_OCCUPANCY,
     CUDA_DEFAULT_IDEAL_OCCUPANCY,
@@ -12,14 +13,14 @@ from .constants import (
     MIN_VBLOCK_SIZE,
     MIN_BLOCk_SIZE,
 )
-from .types import FullOptions, Options
+from .types import Options
 from .utils import is_power_of_2, round_down_to_power_of_2
 
 
 def shuffle(
     data: torch.Tensor,
     iterations: int,
-    options: FullOptions,
+    options: Options | None,
     seed: int,
 ) -> None:
     """POV Shuffle implementation for torch tensors on CUDA.
@@ -29,11 +30,15 @@ def shuffle(
     :param options: POV Shuffle algorithm options.
     :param seed: Random seed or random number generator state.
     """
-    from ._cuda import torch_binding  # Lazy import in case package was built without CUDA
+    from ._cuda import torch_binding
+
+    options = typing.cast(
+        "_TorchCudaOptions",
+        options if options_is_complete(options) else optim_options_for_dataset(data, options),
+    )
 
     preflight(data, iterations, options)
 
-    # Delegate to bound CUDA library
     torch_binding(
         data,
         torch.tensor(options.offsets, dtype=torch.int64),
@@ -45,12 +50,77 @@ def shuffle(
     )
 
 
+class _TorchCudaOptions(Options):
+    virtual_block_size: int
+    physical_block_size: int
+    offsets: list[int]
+    gpu_thread_block_size: int
+
+
+def options_is_complete(options: Options | None) -> bool:
+    return options is not None and None not in (
+        options.virtual_block_size,
+        options.physical_block_size,
+        options.gpu_thread_block_size,
+        options.offsets,
+    )
+
+
+def optim_options_for_dataset(
+    data: torch.Tensor,
+    options: Options | None,
+) -> Options:
+    """Choose POV Shuffle options for dataset."""
+    options = options or Options()
+
+    if options_is_complete(options):
+        warnings.warn("All parameters already specified, skipping optimization")
+        return options
+
+    assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
+    instance_size = get_instance_size(data)
+    dtype_bytes = get_dtype_bytes(data)
+
+    if options.virtual_block_size is None:
+        if options.physical_block_size is not None:
+            purge_dependent_param(options, "virtual_block_size", "physical_block_size")
+        if options.gpu_thread_block_size is not None:
+            purge_dependent_param(options, "virtual_block_size", "gpu_thread_block_size")
+
+    if options.physical_block_size is None and options.offsets is not None:
+        purge_dependent_param(options, "physical_block_size", "offsets")
+
+    return Options(
+        virtual_block_size=(vblk := options.virtual_block_size or MIN_VBLOCK_SIZE),
+        physical_block_size=(
+            pblk := options.physical_block_size or _choose_pblock_size(instance_size, dtype_bytes, vblk, device_id)
+        ),
+        gpu_thread_block_size=_choose_thr_block_size(
+            instance_size=instance_size,
+            dtype_bytes=dtype_bytes,
+            vblock_size=vblk,
+            pblock_size=pblk,
+            device_id=device_id,
+        ),
+        offsets=choose_offsets(
+            deck_size=data.shape[0],
+            instance_size=instance_size,
+            dtype_bytes=dtype_bytes,
+            pblock_size=pblk,
+        ),
+    )
+
+
 def preflight(
     data: torch.Tensor,
     iterations: int,
-    options: FullOptions,
+    options: Options,
 ) -> None:
     """Preflight checks for POV Shuffle on torch tensors."""
+    # Ensure options have already passed through `optim_options_for_dataset`
+    assert options.physical_block_size
+    assert options.virtual_block_size
+    assert options.gpu_thread_block_size
 
     # Dataset preflight  # In sync with: src/povs/__cuda/binds/torch.cpp — dataset preflight
     dtypes = (torch.float16, torch.float32, torch.float64, torch.int32, torch.int64)
@@ -67,40 +137,6 @@ def preflight(
 
     # GPU thread-block preflight  # In sync with: src/povs/__cuda/lib/povs.cu — thread-block preflight
     _validate_thr_block_size(options.gpu_thread_block_size, options.physical_block_size, options.virtual_block_size)
-
-
-def optim_options_for_dataset(
-    data: torch.Tensor,
-    partial_options: Options,
-) -> FullOptions:
-    """Choose POV Shuffle options for dataset."""
-    assert not partial_options.is_fully_specified(cuda_required=True)
-    assert (missing := [x is None for x in partial_options]) == sorted(missing)
-
-    assert (device_id := data.get_device()) != -1, "Tensor device must be CUDA"
-    instance_size = get_instance_size(data)
-    dtype_bytes = get_dtype_bytes(data)
-
-    return FullOptions(
-        virtual_block_size=(vblk := partial_options.virtual_block_size or MIN_VBLOCK_SIZE),
-        physical_block_size=(
-            pblk := partial_options.physical_block_size
-            or _choose_pblock_size(instance_size, dtype_bytes, vblk, device_id)
-        ),
-        offsets=choose_offsets(
-            deck_size=data.shape[0],
-            instance_size=instance_size,
-            dtype_bytes=dtype_bytes,
-            pblock_size=pblk,
-        ),
-        gpu_thread_block_size=_choose_thr_block_size(
-            instance_size=instance_size,
-            dtype_bytes=dtype_bytes,
-            vblock_size=vblk,
-            pblock_size=pblk,
-            device_id=device_id,
-        ),
-    )
 
 
 def _validate_thr_block_size(

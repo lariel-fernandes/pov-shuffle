@@ -1,4 +1,4 @@
-import warnings
+from typing import Any
 
 import numpy as np
 import torch as t
@@ -6,7 +6,7 @@ import torch as t
 from . import numpy as povs_numpy
 from . import torch as povs_torch
 from .common import get_build_params, get_int_seed
-from .types import BuildParams, FullOptions, Options
+from .types import BuildParams, Options
 
 __all__ = [
     "shuffle",
@@ -18,77 +18,59 @@ __all__ = [
 
 
 def shuffle(
-    data: t.Tensor | np.ndarray,
+    data: np.ndarray | t.Tensor,
     iterations: int = 1,
     options: Options | None = None,
-    seed: int | t.Generator | np.random.Generator | None = None,
+    seed: int | np.random.Generator | Any | None = None,
 ) -> None:
-    """POV Shuffle - Implementation routing for numpy (cpu) and torch (cpu, cuda).
+    """POV Shuffle - Main interface with implementation routing.
 
-    :param data: Data tensor or array to shuffle in place along the axis 0.
+    :param data: `torch.Tensor` or `numpy.ndarray` to be shuffled in place along the axis 0.
     :param iterations: Number of shuffling iterations to perform.
-    :param options: POV Shuffle algorithm options. If options are unspecified or partially specified,
-                    the missing downstream parameters are chosen using `povs.optim_options_for_dataset`.
-                    Specified downstream parameters are ignored if at least one upstream parameter is unspecified
-                    (e.g. specifying `povs.Options.physial_block_size` [downstream] without
-                    `povs.Options.virtual_block_size` [upstream] is the same as not specifying it at all)
-    :param seed: Random seed or random number generator state.
+    :param options: POV Shuffle algorithm options.
+                    Partial or missing options are resolved as in `povs.optim_options_for_dataset`.
+    :param seed: Integer seed, `np.random.Generator` or `torch.Generator`.
     """
+    seed = get_int_seed(seed)
 
-    # Use numpy implementation for CPU tensors
-    if isinstance(data, t.Tensor) and data.get_device() == -1:
-        data = data.numpy()
-    is_numpy = isinstance(data, np.ndarray)
-
-    # Resolve options
-    options = options or Options()
-    options = (
-        FullOptions(*options)
-        if options.is_fully_specified(cuda_required=not is_numpy)
-        else optim_options_for_dataset(data, options)
-    )
-
-    # Dispatch shuffle
     if isinstance(data, np.ndarray):
-        povs_numpy.shuffle(data, iterations, options, get_int_seed(seed))
-    elif isinstance(data, t.Tensor):
-        povs_torch.shuffle(data, iterations, options, get_int_seed(seed))
-    else:
-        raise TypeError(f"Unsupported data type: {type(data)}. Expected torch.Tensor or numpy.ndarray.")
+        povs_numpy.shuffle(data, iterations, options, seed)
+        return
+
+    if isinstance(data, t.Tensor):
+        if data.get_device() == -1:
+            shuffle(data.numpy(), iterations, options, seed)
+            return
+
+        povs_torch.shuffle(data, iterations, options, seed)
+        return
+
+    raise TypeError(f"Unsupported data type: {type(data)}")
 
 
 def optim_options_for_dataset(
     data: np.ndarray | t.Tensor,
-    partial_options: Options | None = None,
-) -> FullOptions:
-    """Choose POV Shuffle algorithm options for dataset.
+    options: Options | None = None,
+) -> Options:
+    """Resolve partial or missing POV Shuffle algorithm options, optimizing for the specified dataset.
 
-    :param data: Data tensor or array to shuffle in place along the axis 0.
-    :param partial_options: Starting point for the POV Shuffle algorithm options.
-                            Specified downstream parameters are ignored if at least one upstream parameter is unspecified
-                            (e.g. specifying `povs.Options.physial_block_size` [downstream] without
-                            `povs.Options.virtual_block_size` [upstream] is the same as not specifying it at all)
+    :param data: `torch.Tensor` or `numpy.ndarray`.
+    :param options: Starting point for the POV Shuffle algorithm options.
     :returns: Recommended POV Shuffle algorithm options for the specified dataset.
     """
-
-    # Use numpy implementation for CPU tensors
-    if isinstance(data, t.Tensor) and data.get_device() == -1:
-        data = data.numpy()
-    is_numpy = isinstance(data, np.ndarray)
-
-    partial_options = partial_options or Options()
-
-    if partial_options.is_fully_specified(cuda_required=not is_numpy):
-        warnings.warn("All parameters already specified, skipping optimization")
-        return FullOptions(*partial_options)
-
-    for i, param in enumerate(Options._fields):
-        if partial_options[i] is None and any(x is not None for x in partial_options[i + 1 :]):
-            warnings.warn(f"Upstream param {param} is not specified, ignoring specification of downstream params")
-            partial_options = Options(*partial_options[: i + 1])
-            break
+    options = options or Options()
 
     if isinstance(data, np.ndarray):
-        return povs_numpy.optim_options_for_dataset(data, partial_options)
+        return (
+            options if povs_numpy.options_is_complete(options) else povs_numpy.optim_options_for_dataset(data, options)
+        )
 
-    return povs_torch.optim_options_for_dataset(data, partial_options)
+    if isinstance(data, t.Tensor):
+        if data.get_device() == -1:
+            return optim_options_for_dataset(data.numpy(), options)
+
+        return (
+            options if povs_torch.options_is_complete(options) else povs_torch.optim_options_for_dataset(data, options)
+        )
+
+    raise TypeError(f"Unsupported data type: {type(data)}")

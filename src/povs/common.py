@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright 2025 Dash0 Inc.
 import json
 import math
+import warnings
 from importlib.resources import files
 
 import numpy as np
@@ -15,7 +16,7 @@ from .constants import (
     MIN_SEED,
     MIN_VBLOCK_SIZE,
 )
-from .types import BuildParams, FullOptions
+from .types import BuildParams, Options
 from .utils import is_power_of_2, least_factor_to_make_multiple
 
 
@@ -25,17 +26,20 @@ def get_build_params() -> BuildParams:
     return BuildParams(**data)
 
 
-def get_int_seed(seed: int | torch.Generator | np.random.Generator | None) -> int:
+def get_int_seed(seed: int | np.random.Generator | torch.Generator | None) -> int:
     if isinstance(seed, int):
         return seed
+
+    if seed is None:
+        seed: np.random.Generator = np.random.default_rng()
+
+    if isinstance(seed, np.random.Generator):
+        return int(seed.integers(MIN_SEED, MAX_SEED))  # noqa
 
     if isinstance(seed, torch.Generator):
         return int(torch.randint(MIN_SEED, MAX_SEED, (1,), generator=seed).item())
 
-    if seed is None:
-        seed = np.random.default_rng()
-
-    return int(seed.integers(MIN_SEED, MAX_SEED))
+    raise TypeError(f"Unsupported seed type: {type(seed)}")
 
 
 def get_dtype_bytes(dataset: np.ndarray | torch.Tensor) -> int:
@@ -47,10 +51,15 @@ def get_instance_size(dataset: np.ndarray | torch.Tensor) -> int:
     return total_elements // dataset.shape[0] if dataset.ndim > 1 else 1
 
 
+def purge_dependent_param(options: Options, upstream: str, dependent: str) -> Options:
+    warnings.warn(f"Param `{upstream}` is not specified, ignoring specification of dependent param {dependent}")
+    return options._replace(**{dependent: None})
+
+
 def povs_preflight(
     data: np.ndarray | torch.Tensor,
     iterations: int,
-    options: FullOptions,
+    options: Options,
 ) -> None:
     """Common validations and preparations before running any POV Shuffle implementation."""
 
@@ -58,34 +67,39 @@ def povs_preflight(
     assert (deck_size := data.shape[0]) >= 2, f"dataset must have at least 2 instances, but has {deck_size}"
     assert iterations >= 1, f"iterations ({iterations}) must be at least 1"
     _validate_vblock_size(options.virtual_block_size)
-    _validate_pblock_size(options.physical_block_size)
+    pblock = _validate_pblock_size(options.physical_block_size)
     _validate_offsets(
         options.offsets,
         deck_size=deck_size,
         instance_size=get_instance_size(data),
         dtype_bytes=get_dtype_bytes(data),
-        pblock_size=options.physical_block_size,
+        pblock_size=pblock,
     )
 
 
-def _validate_vblock_size(vblock_size: int) -> None:
+def _validate_vblock_size(vblock_size: int | None) -> int:
+    assert vblock_size is not None, "vblock size must be specified"
     assert is_power_of_2(vblock_size), f"vblock size ({vblock_size}) must be a power of 2"
     assert vblock_size >= MIN_VBLOCK_SIZE, f"vblock size ({vblock_size}) must be at least {MIN_VBLOCK_SIZE}"
+    return vblock_size
 
 
-def _validate_pblock_size(pblock_size: int) -> None:
+def _validate_pblock_size(pblock_size: int | None) -> int:
+    assert pblock_size is not None, "pblock size must be specified"
     assert is_power_of_2(pblock_size), f"pblock size ({pblock_size}) must be a power of 2"
     assert pblock_size >= MIN_PBLOCK_SIZE, f"pblock size ({pblock_size}) must be at least {MIN_PBLOCK_SIZE}"
+    return pblock_size
 
 
 def _validate_offsets(
-    offsets: list[int],
+    offsets: list[int] | None,
     deck_size: int,
     instance_size: int,
     dtype_bytes: int,
     pblock_size: int,
 ) -> None:
-    assert len(offsets) >= MIN_OFFSETS
+    assert offsets is not None, "offsets must be specified"
+    assert len(offsets) >= MIN_OFFSETS, f"at least {MIN_OFFSETS} offsets must be specified"
     instance_bits = instance_size * dtype_bytes * 8
 
     for i, offset in enumerate(offsets):
