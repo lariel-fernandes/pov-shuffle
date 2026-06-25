@@ -12,6 +12,7 @@ from povs.types import FullOptions, Options
 
 from .lstm import LSTMSettings, lstm_predictability
 from .metrics import get_ngram_tvd, get_ngram_tvd_event_space, get_pos_tvd_event_space, get_sample_deficit, get_tvd
+from .types import NgramSpec
 from .utils import ngram_metric_name, time_cpu_op, time_cuda_op
 
 _logger = logging.getLogger(__name__)
@@ -106,12 +107,16 @@ def shuffle_time_per_deck_size(
     )
 
 
+class _BreakingPointPerDeckSizeResult(NamedTuple):
+    options: FullOptions
+    sample_deficit: int
+    positional_breaking_point: int | None
+    ngram_breaking_points: dict[tuple[int, int], int | None]  # (n, skip) -> iteration | None
+    lstm_breaking_point: int | None
+
+
 class BreakingPointPerDeckSizeResult(NamedTuple):
-    options: dict  # deck_size -> FullOptions (after inference)
-    positional_breaking_points: dict  # deck_size -> iteration (1-indexed) | None if not converged
-    ngram_breaking_points: dict  # deck_size -> {(n, skip) -> iteration | None}
-    sample_deficits: dict  # deck_size -> {metric_name -> int}
-    lstm_breaking_points: dict | None = None  # deck_size -> iteration | None; set only when lstm_settings provided
+    deck_sizes: dict[int, _BreakingPointPerDeckSizeResult]  # deck_size -> _BreakingPointPerDeckSizeResult
 
 
 def breaking_point_per_deck_size(
@@ -349,13 +354,16 @@ def _ckpt_save_metrics(ds_ckpt: Path | None, name: str, metrics: dict) -> None:
 
 class BiasPerIterResult(NamedTuple):
     options: FullOptions  # options after inference for dataset
-    tvds: np.ndarray  # shape (max_iterations,)
-    baseline_tvd: float
-    ngram_tvds: np.ndarray  # shape (max_iterations, len(ngram_degrees))
-    baseline_ngram_tvds: np.ndarray  # shape (len(ngram_degrees),)
-    sample_deficits: dict  # metric_name -> int
+    sample_deficits: dict[str, int]  # metric_name -> int
+
+    baseline_pos_tvd: float
+    pos_tvds: np.ndarray  # shape (max_iterations,)
+
+    baseline_ngram_tvds: np.ndarray  # shape (len(ngrams_specs),)
+    ngram_tvds: np.ndarray  # shape (max_iterations, len(ngrams_specs))
+
+    baseline_lstm_predictability: float | None = None
     lstm_predictabilities: np.ndarray | None = None  # shape (max_iterations,)
-    baseline_lstm_predictabilities: float | None = None
 
 
 def bias_per_iteration(
@@ -364,8 +372,7 @@ def bias_per_iteration(
     max_iterations: int,
     options: Options | None,
     rng: np.random.Generator,
-    ngram_degrees: list[int],
-    ngram_skips: list[int],
+    ngrams_specs: list[NgramSpec],
     dtype: torch.dtype,
     device: str,
     lstm_settings: LSTMSettings | None = None,
@@ -377,19 +384,17 @@ def bias_per_iteration(
     :param max_iterations: Test between 1 and max iterations (inclusive).
     :param options: POV Shuffle algorithm options.
     :param rng: Random number generator for reproducibility.
-    :param ngram_degrees: N-gram degrees for which to compute TVD at each iteration.
-    :param ngram_skips: Skip values paired with ``ngram_degrees``; ``0`` means adjacent elements.
+    :param ngrams_specs: N-gram degrees to measure TVD, optionally with skip values to define skip-grams.
     :param dtype: Torch dtype for the deck tensor.
     :param device: Torch device on which to allocate and shuffle the deck tensor.
     :param lstm_settings: If provided, trains an LSTM to measure RTD predictability using the
         context window size from ``settings.context_length``.
     """
-    ngram_pairs = list(zip(ngram_degrees, ngram_skips))
     deck = torch.arange(deck_size, dtype=dtype, device=device)
     options = optim_options_for_dataset(deck, options)
 
     tvds = np.zeros(max_iterations, dtype=float)
-    ngram_tvds = np.zeros((max_iterations, len(ngram_pairs)), dtype=float)
+    ngram_tvds = np.zeros((max_iterations, len(ngrams_specs)), dtype=float)
     lstm_pred = np.zeros(max_iterations) if lstm_settings is not None else None
 
     # Initialize samples and determine the TVD of the POV Shuffle after each iteration
@@ -399,7 +404,7 @@ def bias_per_iteration(
             shuffle(samples[sample_id], iterations=1, seed=rng, options=options)
         samples_np = samples.cpu().numpy()
         tvds[i] = get_tvd(samples_np)
-        ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
+        ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngrams_specs])
         if lstm_settings is not None and lstm_pred is not None:
             lstm_pred[i] = lstm_predictability(samples_np, deck_size, lstm_settings, device)
 
@@ -408,7 +413,7 @@ def bias_per_iteration(
     for sample_id in tqdm(range(num_samples), desc="Samples (baseline)"):
         rng.shuffle(samples_np[sample_id])
     baseline_tvd = get_tvd(samples_np)
-    baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
+    baseline_ngram_tvds = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngrams_specs])
     baseline_lstm = (
         lstm_predictability(samples_np, deck_size, lstm_settings, device) if lstm_settings is not None else None
     )
@@ -419,17 +424,17 @@ def bias_per_iteration(
             ngram_metric_name(n, skip): get_sample_deficit(
                 num_samples, deck_size, get_ngram_tvd_event_space(deck_size, n)
             )
-            for n, skip in ngram_pairs
+            for n, skip in ngrams_specs
         },
     }
 
     return BiasPerIterResult(
-        tvds=tvds,
-        baseline_tvd=baseline_tvd,
+        pos_tvds=tvds,
+        baseline_pos_tvd=baseline_tvd,
         ngram_tvds=ngram_tvds,
         baseline_ngram_tvds=baseline_ngram_tvds,
         options=options,
         sample_deficits=sample_deficits,
         lstm_predictabilities=lstm_pred,
-        baseline_lstm_predictabilities=baseline_lstm,
+        baseline_lstm_predictability=baseline_lstm,
     )

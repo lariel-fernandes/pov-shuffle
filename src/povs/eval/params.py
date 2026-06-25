@@ -3,6 +3,7 @@ from typing import NamedTuple
 from povs import Options
 
 from .lstm import LSTMSettings
+from .types import NgramSpec
 
 
 class BreakingPointParams(NamedTuple):
@@ -79,22 +80,19 @@ class BiasPerIterParams(NamedTuple):
 
     - `seed`: RNG seed for reproducibility.
     - `deck_size`: Number of elements in the deck (dataset size proxy).
-    - `num_samples`: Number of independent shuffles sampled to estimate the output distribution.
+    - `num_episodes`: Number of independent shuffles sampled to estimate the output distribution.
     - `max_iterations`: Number of shuffle iterations tested (from 1 to this value, inclusive).
     - `povs_options`: POV Shuffle algorithm options used in this run.
-    - `ngram_degrees`: N-gram degrees for which TVD was measured.
-    - `ngram_skips`: Number of positions skipped between n-gram elements, one per entry in `ngram_degrees`.
-                     ``0`` means adjacent elements (standard n-gram); positive values produce skip-grams.
+    - `ngrams_specs`: N-gram degrees for which TVD was measured, optionally with skip values to define skip-grams.
     - `dtype`: Torch dtype name for the deck tensor (e.g. ``"int32"``, ``"int64"``).
     - `device`: Torch device on which the deck tensor lives and is shuffled (e.g. ``"cpu"``, ``"cuda"``).
     """
 
     seed: int
-    num_samples: int
+    num_episodes: int
     deck_size: int
     max_iterations: int
-    ngram_degrees: list[int]
-    ngram_skips: list[int]
+    ngrams_specs: list[NgramSpec]
     povs_options: Options | None
     dtype: str
     device: str

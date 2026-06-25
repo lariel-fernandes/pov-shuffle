@@ -3,6 +3,16 @@ import math
 import numpy as np
 
 
+def get_worker_data_scan_per_iter(vblock_size: int, pblock_size: int, deck_size: int) -> float:
+    """Proportion of instances exposed to each parallel worker (e.g. GPU thread block) in each shuffle iteration."""
+    return (vblock_size * pblock_size) / deck_size
+
+
+def get_cumulative_worker_exposure(worker_data_scan_per_iter: float, iterations: int) -> list[float]:
+    """Cumulative proportion of instances exposed per parallel worker (e.g. GPU thread block) after each shuffle iteration."""
+    return [(i + 1) * worker_data_scan_per_iter for i in range(0, iterations)]
+
+
 def get_pos_tvd_event_space(deck_size: int) -> int:
     """Number of valid events for positional TVD: one travel-distance value per deck position."""
     return deck_size
