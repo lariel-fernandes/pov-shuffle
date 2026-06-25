@@ -1,4 +1,4 @@
-from typing import NamedTuple, Union
+from typing import Iterable, NamedTuple, Union
 
 
 class NgramSpec(NamedTuple):
@@ -8,8 +8,12 @@ class NgramSpec(NamedTuple):
     skip: int = 0
 
     @classmethod
-    def parse(cls, x: Union[int, "NgramSpec"]) -> "NgramSpec":
-        return cls(n=x) if isinstance(x, int) else x
+    def parse(cls, x: Union[int, "NgramSpec", Iterable[int]]) -> "NgramSpec":
+        if isinstance(x, cls):
+            return x
+        if isinstance(x, int):
+            return cls(n=x)
+        return cls(*x)
 
     @property
     def title(self) -> str:

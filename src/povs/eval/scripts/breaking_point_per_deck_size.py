@@ -16,38 +16,14 @@ from ..lstm import LSTMSettings
 from ..params import BreakingPointParams
 from ..plots import plot_breaking_point_per_deck_size
 from ..reports import BreakingPointPerDeckSizeReport
-from ..utils import ngram_metric_name
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--resume", action="store_true", help="Resume from the latest checkpoint")
-parser.add_argument("--cleanup", action="store_true", help="Delete checkpoint dirs of all other runs after saving")
-args = parser.parse_args()
-
-exp_dir = Path("./data") / Path(__file__).stem
-
-if args.resume:
-    latest = max((d for d in exp_dir.iterdir() if d.is_dir()), key=lambda d: d.name)
-    start_time = datetime.strptime(latest.name, "%Y-%m-%dT%H:%M:%S")
-else:
-    start_time = datetime.now()
-
-run_dir = exp_dir / start_time.strftime("%Y-%m-%dT%H:%M:%S")
-checkpoint_dir = run_dir / "checkpoint"
-checkpoint_dir.mkdir(parents=True, exist_ok=True)
+from ..types import NgramSpec
 
 # Parameters
 params = BreakingPointParams(
     seed=42,
-    num_samples=500,
+    num_episodes=500,
     deck_sizes=[10_000, 50_000, 100_000, 500_000, 1_000_000],
-    ngram_degrees=[2, 3],
-    ngram_skips=[0, 0],
+    ngram_specs=[NgramSpec.parse(x) for x in [2, 3]],
     positional_tolerance=0.01,
     ngram_tolerances={},
     default_ngram_tolerance=0.01,
@@ -69,14 +45,34 @@ params = BreakingPointParams(
     ),
 )
 
-ngram_pairs = list(zip(params.ngram_degrees, params.ngram_skips))
+# Configure the logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+
+# Parse arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("--resume", action="store_true", help="Resume from the latest checkpoint")
+parser.add_argument("--cleanup", action="store_true", help="Delete checkpoints of all other runs after saving")
+args = parser.parse_args()
+
+# Resolve experiment directories
+exp_dir = Path("./data") / Path(__file__).stem
+if args.resume:
+    latest = max((d for d in exp_dir.iterdir() if d.is_dir()), key=lambda d: d.name)
+    start_time = datetime.strptime(latest.name, "%Y-%m-%dT%H:%M:%S")
+else:
+    start_time = datetime.now()
+run_dir = exp_dir / start_time.strftime("%Y-%m-%dT%H:%M:%S")
+(checkpoint_dir := run_dir / "checkpoint").mkdir(parents=True, exist_ok=True)
 
 # Run experiment
 result = breaking_point_per_deck_size(
     deck_sizes=params.deck_sizes,
-    num_samples=params.num_samples,
-    ngram_degrees=params.ngram_degrees,
-    ngram_skips=params.ngram_skips,
+    num_episodes=params.num_episodes,
+    ngram_specs=params.ngram_specs,
     positional_tolerance=params.positional_tolerance,
     ngram_tolerances=params.ngram_tolerances,
     default_ngram_tolerance=params.default_ngram_tolerance,
@@ -92,55 +88,38 @@ result = breaking_point_per_deck_size(
     checkpoint_dir=checkpoint_dir,
 )
 
-# Non-convergence tracking
-non_convergences: dict[int, list[str]] = {}
-for deck_size in params.deck_sizes:
-    nc = []
-    if result.positional_breaking_points[deck_size] is None:
-        nc.append("positional")
-    for n, skip in ngram_pairs:
-        if result.ngram_breaking_points[deck_size][(n, skip)] is None:
-            nc.append(ngram_metric_name(n, skip))
-    if result.lstm_breaking_points is not None and result.lstm_breaking_points[deck_size] is None:
-        nc.append("lstm_predictability")
-    if nc:
-        non_convergences[deck_size] = nc
-
 # Build breaking_points DataFrame
-metric_cols = ["positional"] + [ngram_metric_name(n, skip) for n, skip in ngram_pairs]
-if result.lstm_breaking_points is not None:
-    metric_cols.append("lstm_predictability")
 rows = []
 for deck_size in params.deck_sizes:
-    row = {"deck_size": deck_size, "positional": result.positional_breaking_points[deck_size]}
-    for n, skip in ngram_pairs:
-        row[ngram_metric_name(n, skip)] = result.ngram_breaking_points[deck_size][(n, skip)]
-    if result.lstm_breaking_points is not None:
-        row["lstm_predictability"] = result.lstm_breaking_points[deck_size]
-    converged = [row[k] for k in metric_cols if row[k] is not None]
-    row["overall"] = max(converged) if len(converged) == len(metric_cols) else None
-    rows.append(row)
-breaking_points = pd.DataFrame(rows)
+    deck_result = result.deck_sizes[deck_size]
+    breaking_points = {
+        "positional": deck_result.positional_breaking_point,
+        **{spec.title: deck_result.ngram_breaking_points[spec] for spec in params.ngram_specs},
+        **({"lstm_predictability": deck_result.lstm_breaking_point} if params.lstm_settings is not None else {}),
+    }
+    converged = [bp or 0 for bp in breaking_points.values()]
+    rows.append({"deck_size": deck_size} | breaking_points | {"overall": max(converged) if all(converged) else None})
+df_breaking_points = pd.DataFrame(rows)
 
 # Put together the report
 report = BreakingPointPerDeckSizeReport(
-    params=params._replace(povs_options_per_deck_size=result.options),
-    breaking_points=breaking_points,
-    non_convergences=non_convergences,
-    sample_deficits=result.sample_deficits,
+    params=params._replace(povs_options_per_deck_size={d: result.deck_sizes[d].options for d in params.deck_sizes}),
+    breaking_points=df_breaking_points,
+    sample_deficits={d: result.deck_sizes[d].sample_deficit for d in params.deck_sizes},
+    non_convergences={d: result.deck_sizes[d].non_convergences or [] for d in params.deck_sizes},
     plot=plot_breaking_point_per_deck_size(
         deck_sizes=params.deck_sizes,
-        positional_breaking_points=[result.positional_breaking_points[s] for s in params.deck_sizes],
+        positional_breaking_points=[result.deck_sizes[d].positional_breaking_point for d in params.deck_sizes],
         ngram_breaking_points={
-            ngram_metric_name(n, skip): [result.ngram_breaking_points[s][(n, skip)] for s in params.deck_sizes]
-            for n, skip in ngram_pairs
+            spec.title: [result.deck_sizes[d].ngram_breaking_points[spec] for d in params.deck_sizes]
+            for spec in params.ngram_specs
         },
         max_iterations=[
             params.max_iterations_per_deck_size.get(s, params.default_max_iterations) for s in params.deck_sizes
         ],
         lstm_breaking_points=(
-            [result.lstm_breaking_points[s] for s in params.deck_sizes]
-            if result.lstm_breaking_points is not None
+            [result.deck_sizes[d].lstm_breaking_point for d in params.deck_sizes]
+            if params.lstm_settings is not None
             else None
         ),
     ),

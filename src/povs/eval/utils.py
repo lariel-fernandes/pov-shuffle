@@ -6,11 +6,6 @@ from typing import Any, Type
 import yaml as _yaml
 
 
-def ngram_metric_name(n: int, skip: int) -> str:
-    """Formatted metric name for an n-gram or skip-gram bias metric."""
-    return f"{n}-gram (skip {skip})" if skip > 0 else f"{n}-gram"
-
-
 def time_cuda_op(op: Callable, num_warmup: int, num_runs: int) -> list[float]:
     """Time a CUDA operation using CUDA events. Returns per-run elapsed times in milliseconds.
 
