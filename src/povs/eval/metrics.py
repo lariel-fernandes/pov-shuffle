@@ -18,7 +18,7 @@ def get_ngram_tvd_event_space(deck_size: int, n: int) -> int:
 def get_sample_deficit(num_episodes: int, deck_size: int, event_space: int) -> int:
     """Signed gap between the event space and the observation budget.
 
-    :returns: ``num_valid - num_samples * deck_size``. Positive means undersampled (more observations
+    :returns: ``event_space - num_episodes * deck_size``. Positive means undersampled (more observations
               would be needed to cover all valid events at least once). Zero means exactly covered.
               Negative means oversampled (surplus observations).
     """
@@ -28,27 +28,26 @@ def get_sample_deficit(num_episodes: int, deck_size: int, event_space: int) -> i
 def get_tvd(episodes: np.ndarray) -> float:
     """Mean per-position Total Variation Distance via the travel-distance distribution.
 
-    For each element in each sample, the travel distance is ``t = (dest_position - src_value) % deck_size``.
+    For each element in each episode, the travel distance is ``t = (dest_position - src_value) % deck_size``.
     In a truly uniform shuffle each travel distance is equally likely, so the reference distribution
     is uniform over ``{0, ..., deck_size - 1}``.
 
     **Adaptive TVD formula**::
 
-        total     = num_samples * deck_size   # total observations
-        num_valid = deck_size                 # number of valid events
-        p_ref     = 1 / min(total, num_valid)
+        num_observations = num_episodes * deck_size  # total observations
+        event_space      = deck_size                 # number of valid events
+        p_ref            = 1 / min(num_observations, event_space)
 
-        TVD = 0.5 * [ sum_observed |count/total - p_ref|
-                    + (min(total, num_valid) - num_observed) * p_ref ]
+        TVD = 0.5 * [ sum_observed |td_counts / num_observations - p_ref|
+                    + (min(num_observations, event_space) - num_observed) * p_ref ]
 
-    Since ``total = num_samples * deck_size >= deck_size = num_valid`` for any ``num_samples >= 1``,
+    Since ``num_observations = num_episodes * deck_size >= deck_size = event_space`` for any ``num_episodes >= 1``,
     this metric is always in the oversampled regime and reduces to the standard TVD of the
     travel-distance distribution against uniform.
 
-    :param episodes: Array of shape ``(num_samples, deck_size)`` containing independent permutations.
+    :param episodes: Array of shape ``(num_episodes, deck_size)`` containing independent permutations.
                     Values must be the monotonically increasing indices ``0`` to ``deck_size - 1``.
     """
-    # TODO: adjust nomenclature of variables in docstring to match the one used in code
     num_episodes, deck_size = episodes.shape
     num_observations = int(num_episodes) * deck_size
     event_space = get_pos_tvd_event_space(deck_size)
@@ -89,32 +88,32 @@ def get_ngram_tvd(episodes: np.ndarray, n: int, skip: int = 0) -> float:
 
     Valid events are all tuples where the underlying value differences
     ``(v_k - v_0) mod N`` form an ordered selection of ``n-1`` distinct non-zero values from
-    ``{1, ..., N-1}``, giving ``num_valid = P(N-1, n-1)`` equally-likely outcomes under a uniform
+    ``{1, ..., N-1}``, giving ``event_space = P(N-1, n-1)`` equally-likely outcomes under a uniform
     shuffle. This count is the same for all values of ``skip``.
 
     **Adaptive TVD formula**::
 
-        total     = num_samples * deck_size
-        num_valid = P(deck_size - 1, n - 1)
-        p_ref     = 1 / min(total, num_valid)
+        num_observations = num_episodes * deck_size
+        event_space      = P(deck_size - 1, n - 1)
+        p_ref            = 1 / min(num_observations, event_space)
 
-        TVD = 0.5 * [ sum_observed |count/total - p_ref|
-                    + (min(total, num_valid) - num_observed) * p_ref ]
+        TVD = 0.5 * [ sum_observed |key_counts / num_observations - p_ref|
+                    + (min(num_observations, event_space) - num_distinct_observed_events) * p_ref ]
 
     Observed events are counted sparsely (no enumeration of all valid tuples), so the unobserved
     contribution is computed analytically. Episodes are processed in batches to keep peak memory
-    proportional to ``batch_size * deck_size * n`` rather than ``num_samples * deck_size * n``.
+    proportional to ``batch_size * deck_size * n`` rather than ``num_episodes * deck_size * n``.
 
     **Sampling regimes**:
 
-    - ``n = 2``: ``num_valid = deck_size - 1``, ``total / num_valid ≈ num_samples``. Always
-      oversampled for reasonable ``num_samples``; reduces to standard TVD.
-    - ``n = 3``: ``num_valid ≈ deck_size²``. Undersampled when ``num_samples < deck_size``.
-      In that regime ``p_ref = 1 / total``, so a perfectly uniform shuffler scores TVD ≈ 0
+    - ``n = 2``: ``event_space = deck_size - 1``, ``num_observations / event_space ≈ num_episodes``. Always
+      oversampled for reasonable ``num_episodes``; reduces to standard TVD.
+    - ``n = 3``: ``event_space ≈ deck_size²``. Undersampled when ``num_episodes < deck_size``.
+      In that regime ``p_ref = 1 / num_observations``, so a perfectly uniform shuffler scores TVD ≈ 0
       (unobserved events are not penalized beyond the sample budget), while a biased shuffler
       that revisits patterns scores higher because it observes fewer distinct events.
 
-    :param episodes: Array of shape ``(num_samples, deck_size)`` containing independent permutations.
+    :param episodes: Array of shape ``(num_episodes, deck_size)`` containing independent permutations.
     :param n: Degree of the n-gram.
     :param skip: Number of positions skipped between consecutive n-gram elements.
                  ``0`` (default) means adjacent elements; ``1`` means every other element, etc.
