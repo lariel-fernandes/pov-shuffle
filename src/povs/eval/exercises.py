@@ -11,7 +11,7 @@ from povs import optim_options_for_dataset, shuffle
 from povs.types import FullOptions, Options
 
 from .lstm import LSTMSettings, lstm_predictability
-from .metrics import get_ngram_tvd, get_ngram_tvd_num_valid, get_sample_deficit, get_tvd, get_tvd_num_valid
+from .metrics import get_ngram_tvd, get_ngram_tvd_event_space, get_pos_tvd_event_space, get_sample_deficit, get_tvd
 from .utils import ngram_metric_name, time_cpu_op, time_cuda_op
 
 _logger = logging.getLogger(__name__)
@@ -293,10 +293,10 @@ def breaking_point_per_deck_size(
         if lstm_bps is not None:
             lstm_bps[deck_size] = lstm_bp
         deficits_out[deck_size] = {
-            "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
+            "positional": get_sample_deficit(num_samples, deck_size, get_pos_tvd_event_space(deck_size)),
             **{
                 ngram_metric_name(n, skip): get_sample_deficit(
-                    num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n)
+                    num_samples, deck_size, get_ngram_tvd_event_space(deck_size, n)
                 )
                 for n, skip in ngram_pairs
             },
@@ -400,7 +400,7 @@ def bias_per_iteration(
         samples_np = samples.cpu().numpy()
         tvds[i] = get_tvd(samples_np)
         ngram_tvds[i, :] = np.array([get_ngram_tvd(samples_np, n, skip=skip) for n, skip in ngram_pairs])
-        if lstm_settings is not None:
+        if lstm_settings is not None and lstm_pred is not None:
             lstm_pred[i] = lstm_predictability(samples_np, deck_size, lstm_settings, device)
 
     # Re-initialize samples and determine the TVD of a perfect shuffle (baseline)
@@ -414,10 +414,10 @@ def bias_per_iteration(
     )
 
     sample_deficits = {
-        "positional": get_sample_deficit(num_samples, deck_size, get_tvd_num_valid(deck_size)),
+        "positional": get_sample_deficit(num_samples, deck_size, get_pos_tvd_event_space(deck_size)),
         **{
             ngram_metric_name(n, skip): get_sample_deficit(
-                num_samples, deck_size, get_ngram_tvd_num_valid(deck_size, n)
+                num_samples, deck_size, get_ngram_tvd_event_space(deck_size, n)
             )
             for n, skip in ngram_pairs
         },

@@ -53,21 +53,19 @@ worker_data_scan_per_iter = (
     result.options.physical_block_size * result.options.virtual_block_size
 ) / params.num_samples
 
-biases = pd.DataFrame({
-    "iteration": range(1, params.max_iterations + 1),
-    "cumulative_exposure": [i * worker_data_scan_per_iter for i in range(1, params.max_iterations + 1)],
-    "positional": result.tvds,
-    **{name: result.ngram_tvds[:, i] for i, name in enumerate(ngram_names)},
-    **({"lstm_predictability": result.lstm_predictabilities} if result.lstm_predictabilities is not None else {}),
-})
-
 # Put together the report
 report = BiasPerIterReport(
     params=params._replace(povs_options=result.options),
     worker_data_scan_per_iter=worker_data_scan_per_iter,
     baseline_tvd=result.baseline_tvd,
     baseline_ngram_tvds=result.baseline_ngram_tvds.tolist(),
-    biases=biases,
+    biases=pd.DataFrame({
+        "iteration": range(1, params.max_iterations + 1),
+        "cumulative_exposure": [i * worker_data_scan_per_iter for i in range(1, params.max_iterations + 1)],
+        "positional": result.tvds,
+        **{name: result.ngram_tvds[:, i] for i, name in enumerate(ngram_names)},
+        **({"lstm_predictability": result.lstm_predictabilities} if result.lstm_predictabilities is not None else {}),
+    }),
     plot=plot_bias_per_iteration(
         tvds=result.tvds,
         baseline=result.baseline_tvd,
