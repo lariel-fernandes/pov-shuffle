@@ -39,21 +39,12 @@ def shuffle(
 
     preflight(data, iterations, options)
 
-    # Init random generator
     rng = np.random.default_rng(seed)
-
-    # Block count arithmetic
     n_pblocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
+    vbid_2_bids = np.arange(n_vblocks * options.virtual_block_size).reshape((n_vblocks, options.virtual_block_size))
 
     for _ in range(iterations):
-        # WARNING: The sequence of rng usages in the next 3 code blocks must match the one in the CUDA
-        #          implementation for reproducibility (shuffling, then seed sampling, then offset sampling)
-
-        # Build a mapping of each virtual block ID to its physical block IDs
-        vbid_2_bids = np.arange(n_vblocks * options.virtual_block_size)
-        rng.shuffle(vbid_2_bids)
-        vbid_2_bids = vbid_2_bids.reshape((n_vblocks, options.virtual_block_size))
-
+        rng.shuffle(vbid_2_bids.ravel())
         seeds: np.ndarray = rng.integers(MIN_SEED, MAX_SEED, size=n_vblocks)  # noqa
         offset = options.offsets[rng.integers(0, len(options.offsets))]  # Sample a pblocks start offset
 

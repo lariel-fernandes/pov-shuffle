@@ -9,7 +9,7 @@ __all__: list[str] = ["torch_binding"]
 def torch_binding(
     arg0: torch.Tensor,
     arg1: torch.Tensor,
-    arg2: typing.SupportsInt,
+    arg2: torch.Tensor,
     arg3: typing.SupportsInt,
     arg4: typing.SupportsInt,
     arg5: typing.SupportsInt,

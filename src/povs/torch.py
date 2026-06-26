@@ -3,13 +3,22 @@ import warnings
 
 import torch
 
-from .common import choose_offsets, get_dtype_bytes, get_instance_size, povs_preflight, purge_dependent_param
+from .common import (
+    choose_offsets,
+    get_block_counts,
+    get_dtype_bytes,
+    get_instance_size,
+    povs_preflight,
+    purge_dependent_param,
+)
 from .constants import (
     CUDA_CC_IDEAL_OCCUPANCY,
     CUDA_DEFAULT_IDEAL_OCCUPANCY,
     MAX_BLOCK_SIZE,
+    MAX_SEED,
     MIN_CUDA_ARCH,
     MIN_PBLOCK_SIZE,
+    MIN_SEED,
     MIN_VBLOCK_SIZE,
     MIN_BLOCk_SIZE,
 )
@@ -39,15 +48,32 @@ def shuffle(
 
     preflight(data, iterations, options)
 
-    torch_binding(
-        data,
-        torch.tensor(options.offsets, dtype=torch.int64),
-        iterations,
-        options.physical_block_size,
-        options.virtual_block_size,
-        options.gpu_thread_block_size,
-        seed,
-    )
+    device = data.get_device()
+    generator = torch.Generator(device=device).manual_seed(seed)
+    _, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
+
+    for _ in range(iterations):
+        vbid_2_bids = torch.randperm(
+            n_vblocks * options.virtual_block_size, device=device, dtype=torch.int64, generator=generator
+        ).reshape(n_vblocks, options.virtual_block_size)
+
+        seeds = torch.randint(
+            MIN_SEED, MAX_SEED, size=(n_vblocks,), device=device, dtype=torch.int32, generator=generator
+        )
+
+        offset = options.offsets[
+            int(torch.randint(len(options.offsets), (1,), device=device, generator=generator).item())
+        ]
+
+        torch_binding(
+            data,
+            vbid_2_bids,
+            seeds,
+            offset,
+            options.physical_block_size,
+            options.virtual_block_size,
+            options.gpu_thread_block_size,
+        )
 
 
 class _TorchCudaOptions(Options):
