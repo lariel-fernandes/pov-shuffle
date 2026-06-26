@@ -17,13 +17,13 @@
 #endif
 
 void torch_povs(
-    const torch::Tensor& X, // Data to shuffle in place along the axis 0
-    const torch::Tensor& O, // Valid block start offsets
-    const int iterations,
+    const torch::Tensor& X, // Data to shuffle in place along the axis 0 - device, shape (num_instances, instance_size)
+    const torch::Tensor& A, // Virtual block assignments — device, int64, shape (num_vblocks, vblock_size)
+    const torch::Tensor& S, // Per-vblock seeds — device, int32, shape (num_vblocks,)
+    const long offset,      // Physical block start offset
     const int pblock_size,
     const int vblock_size,
-    const int block_size,
-    const int seed
+    const int block_size
 )
 {
     // Dataset preflight — keep in sync with povs.torch.preflight, dataset section
@@ -34,10 +34,25 @@ void torch_povs(
             X.scalar_type() == at::kLong,
         "Unsupported data type"
     );
-    TORCH_CHECK(O.is_cpu(), "O must be a CPU tensor");
 
-    const long* Oh_ptr = O.data_ptr<long>(); // O pointer in host memory
-    const long num_offsets = O.size(0);
+    // Assignments preflight
+    TORCH_CHECK(A.is_cuda(), "A must be a CUDA tensor");
+    TORCH_CHECK(A.get_device() == X.get_device(), "A must be on the same device as X");
+    TORCH_CHECK(A.is_contiguous(), "A must be contiguous");
+    TORCH_CHECK(A.scalar_type() == at::kLong, "A must be int64");
+    TORCH_CHECK(A.dim() == 2, "A must be 2-dimensional");
+    TORCH_CHECK(A.size(1) == vblock_size, "A.size(1) must equal vblock_size");
+
+    // Seeds preflight
+    TORCH_CHECK(S.is_cuda(), "S must be a CUDA tensor");
+    TORCH_CHECK(S.get_device() == X.get_device(), "S must be on the same device as X");
+    TORCH_CHECK(S.is_contiguous(), "S must be contiguous");
+    TORCH_CHECK(S.scalar_type() == at::kInt, "S must be int32");
+    TORCH_CHECK(S.dim() == 1, "S must be 1-dimensional");
+    TORCH_CHECK(S.size(0) == A.size(0), "S.size(0) must equal A.size(0) (num_vblocks)");
+
+    const long* Ag_ptr = A.data_ptr<long>();
+    const int* Sg_ptr = S.data_ptr<int>();
     const long num_instances = X.size(0);
 
     // Calculate instance size as the flattened row size.
@@ -52,8 +67,8 @@ void torch_povs(
         auto* Xg_ptr = X.data_ptr<scalar_t>();
         (povs_cuda<VBLOCK_SIZE, PBLOCK_SIZE, INSTANCE_SIZE, scalar_t>)(
             Xg_ptr, num_instances,
-            Oh_ptr, num_offsets,
-            iterations, seed, X.get_device(), block_size
+            Ag_ptr, Sg_ptr, offset,
+            block_size
         );
     });
     // clang-format on

@@ -358,13 +358,10 @@ void povs_cuda(
     DType* Xg_ptr, // Instances to shuffle in place - Global device memory pointer.
                    // Col-major (InstanceSize, num_instances) -- equivalent to Row-major (num_instances, InstanceSize)
     const long num_instances,
-
-    const long* Oh_ptr, // Valid block start offsets with dim (num_offsets,) - Host memory pointer
-    const long num_offsets,
-
-    const int iterations,
-    const int seed,
-    const int8_t device_id,
+    const long* Ag_ptr, // Physical to Virtual block assignments - Global device memory pointer.
+                        // Col-major (VBlockSize, num_vblocks) — caller-owned
+    const int* Sg_ptr,  // Per-vblock random seeds - Global device memory pointer with shape (num_vblocks,) — caller-owned
+    const long offset,  // Physical block start offset
     const int block_size
 )
 {
@@ -381,88 +378,41 @@ void povs_cuda(
     cudaError_t cudaStatus = cudaSuccess;
 
     // Shuffle block arithmetic
-    long offset = 0l; // Sampled later per iteration
     const long num_pblocks = div_round_up(num_instances, PBlockSize);
     const long num_vblocks = div_round_up(num_pblocks, VBlockSize);
-    const long num_assignments = num_vblocks * VBlockSize; // Number of physical to virtual block assignments. This can be larger than
-                                                           // num_pblocks, in which case some vblocks will get -1 (padding) assignments
 
     // GPU thread-block arithmetic
     const int num_blocks = num_vblocks;
     constexpr int MinBlockSize = get_copy_width<DType, InstanceSize>();
     bool valid_block_size = false; // Flag for the dispatch guard
 
-    // Initialize random distributions
-    std::mt19937 rng(seed);
-    std::uniform_int_distribution offset_dist(0l, num_offsets - 1);
-    std::uniform_int_distribution seed_dist(MIN_SEED, MAX_SEED - 1);
+    // Submit kernel
+    valid_block_size = (DISPATCH_BLOCK_SIZE(PBlockSize, VBlockSize, MinBlockSize, block_size, [&] {
+        (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize, BlockSize>
+         <<<num_blocks, BlockSize>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
+    }));
 
-    // Allocate host pointers
-    int* Sh_ptr = new int[num_vblocks];       // Random generator seeds - Host memory pointer with shape (num_vblocks,)
-    long* Ah_ptr = new long[num_assignments]; // Physical to Virtual block assignments - Host memory pointer with shape (num_assignments,)
-    for (int i = 0; i < num_assignments; ++i)
-        Ah_ptr[i] = i < num_pblocks ? i : -1; // Initialize with identity mapping for every valid pblock ID, padding with -1
-
-    // Allocate device pointers
-    int* Sg_ptr = nullptr;  // Virtual block random seeds - Global device memory pointer with shape (num_vblocks,)
-    long* Ag_ptr = nullptr; // Physical to Virtual block assignments - Global device mem pointer. Col-major (VBlockSize, num_vblocks)
-                            // Each column [:,j] holds the IDs of the ith pblocks assigned to the jth vblock
-    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaSetDevice(device_id));
-    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMalloc(&Sg_ptr, sizeof(int) * num_vblocks));
-    CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMalloc(&Ag_ptr, sizeof(long) * num_assignments));
-
-    // Iterate Kernel submissions
-    for (int iter = 0; iter < iterations; ++iter) {
-
-        // WARNING: The sequence of rng usages in the next 3 code blocks must match the one in the numpy
-        //          implementation for reproducibility (shuffling, then seed sampling, then offset sampling)
-
-        // Shuffle the pblock to vblock assignments
-        shuffle_array(Ah_ptr, num_pblocks, rng);
-        CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMemcpy(Ag_ptr, Ah_ptr, sizeof(long) * num_assignments, cudaMemcpyHostToDevice));
-
-        // Sample random seeds for every vblock
-        for (int i = 0; i < num_vblocks; ++i)
-            Sh_ptr[i] = seed_dist(rng);
-        CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaMemcpy(Sg_ptr, Sh_ptr, sizeof(int) * num_vblocks, cudaMemcpyHostToDevice));
-
-        // Sample a pblock start offset
-        offset = Oh_ptr[offset_dist(rng)];
-
-        // Submit kernel
-        valid_block_size = (DISPATCH_BLOCK_SIZE(PBlockSize, VBlockSize, MinBlockSize, block_size, [&] {
-            (povs_kernel<DType, PBlockSize, VBlockSize, InstanceSize, BlockSize>
-             <<<num_blocks, BlockSize>>>(Xg_ptr, Ag_ptr, Sg_ptr, offset, num_instances));
-        }));
-
-        // Guard against a bad block size dispatch
-        if (!valid_block_size) {
-            fprintf(
-                stderr,
-                "povs_cuda: block_size=%d has no valid instantiation (PBlockSize=%d, VBlockSize=%d)\n",
-                block_size,
-                PBlockSize,
-                VBlockSize
-            );
-            cudaStatus = cudaErrorInvalidValue;
-            goto cleanup;
-        }
-
-        CUDA_CHECK_LAST_STATUS(&cudaStatus, cleanup);
+    // Guard against a bad block size dispatch
+    if (!valid_block_size) {
+        fprintf(
+            stderr,
+            "povs_cuda: block_size=%d has no valid instantiation (PBlockSize=%d, VBlockSize=%d)\n",
+            block_size,
+            PBlockSize,
+            VBlockSize
+        );
+        cudaStatus = cudaErrorInvalidValue;
+        goto cleanup;
     }
 
+    CUDA_CHECK_LAST_STATUS(&cudaStatus, cleanup);
+
 #ifdef STANDALONE_BUILD
-    // Because the kernel submissions for all iterations are queued into the same stream, there is no need to synchronize inbetween.
-    // For standalone builds, we synchronize once after all kernel submissions.
-    // In a full build, the caller is responsible for the CUDA stream synchronization (usually managed by Torch)
+    // In a full build, the caller is responsible for CUDA stream synchronization (usually managed by Torch).
     CUDA_CHECK_STATUS(&cudaStatus, cleanup, cudaDeviceSynchronize());
 #endif
 
 cleanup:
-    delete[] Ah_ptr;
-    delete[] Sh_ptr;
-    cudaFree(Ag_ptr);
-    cudaFree(Sg_ptr);
     if (cudaStatus != cudaSuccess) exit(cudaStatus);
 }
 
@@ -484,12 +434,11 @@ int main()
     constexpr int InstanceSize = 4;
 
     constexpr long num_instances = 64;
-    constexpr int iterations = 1;
-    constexpr int seed = 13;
-    constexpr int8_t device_id = 0;
+    constexpr long offset = 0;
 
-    constexpr int num_offsets = 1;
-    constexpr long Oh_ptr[num_offsets] = {0};
+    const long num_pblocks = div_round_up(num_instances, (long) PBlockSize);
+    const long num_vblocks = div_round_up(num_pblocks, (long) VBlockSize);
+    const long num_assignments = num_vblocks * VBlockSize;
 
     // Host buffer and CuTe tensor view: col-major (InstanceSize, num_instances)
     auto* Xh_ptr = new DType[InstanceSize * num_instances];
@@ -506,18 +455,54 @@ int main()
         printf("%02.0f ", Xh(0, i));
     printf("\n");
 
+    // Build shuffled assignments on host, then copy to device
+    auto* Ah_ptr = new long[num_assignments];
+    for (long i = 0; i < num_assignments; ++i)
+        Ah_ptr[i] = i < num_pblocks ? i : -1;
+    std::mt19937 rng(13);
+    shuffle_array(Ah_ptr, num_pblocks, rng);
+
+    // Build per-vblock seeds on host (deterministic), then copy to device
+    auto* Sh_ptr = new int[num_vblocks];
+    std::uniform_int_distribution seed_dist(MIN_SEED, MAX_SEED - 1);
+    for (long i = 0; i < num_vblocks; ++i)
+        Sh_ptr[i] = seed_dist(rng);
+
     // Copy to device, run kernel, copy back
     DType* Xg_ptr = nullptr;
+    long* Ag_ptr = nullptr;
+    int* Sg_ptr = nullptr;
     cudaError_t status = cudaMalloc(&Xg_ptr, sizeof(DType) * size(Xh));
     if (status != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(status));
         delete[] Xh_ptr;
+        delete[] Ah_ptr;
+        delete[] Sh_ptr;
+        return 1;
+    }
+    status = cudaMalloc(&Ag_ptr, sizeof(long) * num_assignments);
+    if (status != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(status));
+        cudaFree(Xg_ptr);
+        delete[] Xh_ptr;
+        delete[] Ah_ptr;
+        delete[] Sh_ptr;
+        return 1;
+    }
+    status = cudaMalloc(&Sg_ptr, sizeof(int) * num_vblocks);
+    if (status != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(status));
+        cudaFree(Xg_ptr);
+        cudaFree(Ag_ptr);
+        delete[] Xh_ptr;
+        delete[] Ah_ptr;
+        delete[] Sh_ptr;
         return 1;
     }
     cudaMemcpy(Xg_ptr, Xh_ptr, sizeof(DType) * size(Xh), cudaMemcpyHostToDevice);
-    povs_cuda<VBlockSize, PBlockSize, InstanceSize, DType>(
-        Xg_ptr, num_instances, Oh_ptr, num_offsets, iterations, seed, device_id, PBlockSize * VBlockSize
-    );
+    cudaMemcpy(Ag_ptr, Ah_ptr, sizeof(long) * num_assignments, cudaMemcpyHostToDevice);
+    cudaMemcpy(Sg_ptr, Sh_ptr, sizeof(int) * num_vblocks, cudaMemcpyHostToDevice);
+    povs_cuda<VBlockSize, PBlockSize, InstanceSize, DType>(Xg_ptr, num_instances, Ag_ptr, Sg_ptr, offset, PBlockSize * VBlockSize);
     cudaMemcpy(Xh_ptr, Xg_ptr, sizeof(DType) * size(Xh), cudaMemcpyDeviceToHost);
 
     printf("Output  (first %ld): ", print_limit);
@@ -549,8 +534,12 @@ int main()
     printf("\nTotal: %ld | Seen %d | Intact %d | Broken %d\n", num_instances, seen, intact, broken);
 
     cudaFree(Xg_ptr);
+    cudaFree(Ag_ptr);
+    cudaFree(Sg_ptr);
     delete[] seen_count;
     delete[] Xh_ptr;
+    delete[] Ah_ptr;
+    delete[] Sh_ptr;
     return 0;
 }
 #endif
