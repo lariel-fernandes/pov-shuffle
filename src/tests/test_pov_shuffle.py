@@ -82,6 +82,64 @@ def _make_deck(deck_size: int, instance_shape: tuple[int, ...], device: str) -> 
     return tensor if device == "cpu" else tensor.to(device)
 
 
+@pytest.mark.parametrize(
+    "device",
+    [
+        "numpy",
+        "cpu",
+        pytest.param("cuda:0", marks=_MARK_SKIP_CUDA),
+    ],
+)
+def test_pov_shuffle_partial_pblock(device: str) -> None:
+    """Regression: every valid physical block must be shuffled when deck_size % pblock_size != 0.
+
+    deck_size=40, pblock_size=16 → n_pblocks=3, last pblock has only 8 valid instances.
+    n_pblocks=3 is also not divisible by vblock_size=2, so one padding slot is present too,
+    exercising both edge cases simultaneously.
+    """
+    opts = Options(physical_block_size=16, virtual_block_size=2, offsets=[4, 8])
+    deck_size = 40
+
+    for seed in range(20):
+        data = _make_deck(deck_size, (8,), device)
+        shuffle(data, iterations=1, options=opts, seed=seed)
+        _check_integrity(data, deck_size, (8,))
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        "numpy",
+        "cpu",
+        pytest.param("cuda:0", marks=_MARK_SKIP_CUDA),
+    ],
+)
+def test_pov_shuffle_padding_block(device: str) -> None:
+    """Regression: every valid physical block must be shuffled when n_pblocks % vblock_size != 0.
+
+    deck_size=48, pblock_size=16 → n_pblocks=3, not divisible by vblock_size=2.
+    The last virtual block has one padding slot (phantom ID 3). The valid block paired
+    with the phantom must still be shuffled; its data at original positions must change.
+    With ~50% probability per seed the phantom lands at position 0, triggering the bug.
+    Over 20 seeds the probability of no seed triggering it is ≈ 0.5^20 < 10^-6.
+    """
+    opts = Options(physical_block_size=16, virtual_block_size=2, offsets=[4, 8])
+    n_pblocks = 3  # ceil(48 / 16)
+
+    for seed in range(20):
+        data = _make_deck(48, (8,), device)
+        original = data.clone() if isinstance(data, torch.Tensor) else data.copy()
+        shuffle(data, iterations=1, options=opts, seed=seed)
+        data_arr = data.cpu().numpy() if isinstance(data, torch.Tensor) else data
+        orig_arr = original.cpu().numpy() if isinstance(original, torch.Tensor) else original
+
+        for pbid in range(n_pblocks):
+            block = slice(pbid * 16, pbid * 16 + 16)
+            assert not np.array_equal(data_arr[block], orig_arr[block]), (
+                f"Physical block {pbid} was not shuffled with seed={seed} on {device}"
+            )
+
+
 def _check_integrity(data: np.ndarray | torch.Tensor, deck_size: int, instance_shape: tuple[int, ...]) -> None:
     instance_size = math.prod(instance_shape)
     arr = data.cpu().numpy() if isinstance(data, torch.Tensor) else data
