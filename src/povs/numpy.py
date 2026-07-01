@@ -41,14 +41,16 @@ def shuffle(
 
     rng = np.random.default_rng(seed)
     n_pblocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
+
     vbid_2_bids = np.arange(n_vblocks * options.virtual_block_size).reshape((n_vblocks, options.virtual_block_size))
+    vbid_2_bids[vbid_2_bids >= n_pblocks] = -1
 
     for _ in range(iterations):
         rng.shuffle(vbid_2_bids.ravel())
         seeds: np.ndarray = rng.integers(MIN_SEED, MAX_SEED, size=n_vblocks)  # noqa
         offset = options.offsets[rng.integers(0, len(options.offsets))]  # Sample a pblocks start offset
 
-        worker = _get_worker(vbid_2_bids, seeds, n_pblocks, data, offset, options)
+        worker = _get_worker(vbid_2_bids, seeds, data, offset, options)
         np.vectorize(worker)(np.arange(n_vblocks))  # Process all virtual blocks
 
 
@@ -95,7 +97,7 @@ def optim_options_for_dataset(
 def preflight(
     data: np.ndarray,
     iterations: int,
-    options: Options,
+    options: _NumpyCpuOptions,
 ) -> None:
     povs_preflight(data, iterations, options)
 
@@ -103,28 +105,23 @@ def preflight(
 def _get_worker(
     vbid_2_bids: np.ndarray,
     seeds: np.ndarray,
-    n_pblocks: int,
     data: np.ndarray,
     offset: int,
     options: _NumpyCpuOptions,
 ):
     def _worker(vbid: int):
         """Processes a single virtual block ID."""
-        bids = vbid_2_bids[vbid]  # Read physical block IDs
+        valid_bids = [bid for bid in vbid_2_bids[vbid] if bid != -1]
 
-        # Read the physical blocks into local array and shuffle with seed
         local = np.concat([
             _safe_read_arr(data, offset, bid * options.physical_block_size, options.physical_block_size)
-            for bid in bids
-            if bid < n_pblocks
+            for bid in valid_bids
         ])
         np.random.RandomState(seed=seeds[vbid]).shuffle(local)
 
-        # Write back shuffled data to physical blocks
-        for i, bid in enumerate(bids):
-            if bid < n_pblocks:
-                shuffled = local[i * options.physical_block_size : (i + 1) * options.physical_block_size]
-                _safe_set_arr(data, offset, bid * options.physical_block_size, shuffled)
+        for i, bid in enumerate(valid_bids):
+            shuffled = local[i * options.physical_block_size : (i + 1) * options.physical_block_size]
+            _safe_set_arr(data, offset, bid * options.physical_block_size, shuffled)
 
     return _worker
 
