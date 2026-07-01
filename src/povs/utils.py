@@ -5,7 +5,7 @@ import torch
 
 
 def numpy_to_torch_dtype(dtype: np.dtype) -> torch.dtype:
-    return getattr(torch, dtype.__name__)
+    return getattr(torch, np.dtype(dtype).name)
 
 
 def is_power_of_2(x: int) -> bool:
