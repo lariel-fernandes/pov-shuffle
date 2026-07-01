@@ -26,7 +26,7 @@ def shuffle(
     options: Options | None,
     seed: int,
 ) -> None:
-    """POV Shuffle implementation for `numpy.memmap`.
+    """POV Shuffle implementation for `numpy.memmap` with batch processing via PyTorch on CUDA.
 
     :param data: Memmap file wrapper to shuffle in place along the axis 0.
     :param iterations: Number of shuffling iterations to perform.
