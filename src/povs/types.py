@@ -30,3 +30,6 @@ class Options(NamedTuple):
     offsets: list[int] | None = None
 
     gpu_thread_block_size: int | None = None
+
+    memmap_batch_size: int | None = None
+    memmap_cuda_device_id: int | None = None
