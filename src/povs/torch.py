@@ -50,12 +50,13 @@ def shuffle(
 
     device = data.get_device()
     generator = torch.Generator(device=device).manual_seed(seed)
-    _, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
+    n_pblocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
 
     for _ in range(iterations):
         vbid_2_bids = torch.randperm(
             n_vblocks * options.virtual_block_size, device=device, dtype=torch.int64, generator=generator
         ).reshape(n_vblocks, options.virtual_block_size)
+        vbid_2_bids[vbid_2_bids >= n_pblocks] = -1
 
         seeds = torch.randint(
             MIN_SEED, MAX_SEED, size=(n_vblocks,), device=device, dtype=torch.int32, generator=generator
@@ -140,13 +141,9 @@ def optim_options_for_dataset(
 def preflight(
     data: torch.Tensor,
     iterations: int,
-    options: Options,
+    options: _TorchCudaOptions,
 ) -> None:
     """Preflight checks for POV Shuffle on torch tensors."""
-    # Ensure options have already passed through `optim_options_for_dataset`
-    assert options.physical_block_size
-    assert options.virtual_block_size
-    assert options.gpu_thread_block_size
 
     # Dataset preflight  # In sync with: src/povs/__cuda/binds/torch.cpp — dataset preflight
     dtypes = (torch.float16, torch.float32, torch.float64, torch.int32, torch.int64)
