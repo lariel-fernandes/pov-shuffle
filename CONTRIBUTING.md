@@ -12,9 +12,6 @@ testing:
 evaluation:
 - [ ] experiment: compare the resulting TVD and other biases against a standard local block shuffle
 
-features:
-- [ ] "large" povs accepting memmap file as input and shuffling in place in batches of virtual blocks
-
 ## Project Structure
 
 ```
