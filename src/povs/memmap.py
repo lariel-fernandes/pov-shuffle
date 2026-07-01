@@ -48,7 +48,9 @@ def shuffle(
     instances_per_vblock = options.virtual_block_size * options.physical_block_size
     n_pblocks, n_vblocks = get_block_counts(**options._asdict(), deck_size=len(data))
     num_batches = math.ceil(n_vblocks / options.memmap_batch_size)
+
     pblk_size = options.physical_block_size
+    last_pblock_deficit = n_pblocks * pblk_size - len(data)  # zero if deck_size is divisible by pblk_size
 
     batch_data = torch.empty(
         (options.memmap_batch_size * instances_per_vblock, get_instance_size(data)),
@@ -63,16 +65,31 @@ def shuffle(
         ).reshape(n_vblocks, options.virtual_block_size)
         vbid_2_bids[vbid_2_bids >= n_pblocks] = -1
 
+        # Move the vblock that has the smaller pblock to the end, and that pblock within it to the last position
+        # This ensures that we only need to handle the last pblock deficit in the tail of the last batch
+        if last_pblock_deficit > 0:
+            row_idx, col_idx = (vbid_2_bids == n_pblocks - 1).nonzero(as_tuple=False)[0].tolist()
+            last_row, last_col = n_vblocks - 1, options.virtual_block_size - 1
+            if row_idx != last_row:
+                vbid_2_bids[[row_idx, last_row]] = vbid_2_bids[[last_row, row_idx]]
+                row_idx = last_row
+            if col_idx != last_col:
+                vbid_2_bids[row_idx, [col_idx, last_col]] = vbid_2_bids[row_idx, [last_col, col_idx]]
+
         offset = options.offsets[
             int(torch.randint(len(options.offsets), (1,), device=device, generator=generator).item())
         ]
 
         for i in range(num_batches):
             batch_assignments = vbid_2_bids[i * options.memmap_batch_size : (i + 1) * options.memmap_batch_size, :]
-            instances_in_batch = instances_per_vblock * (num_vblks_in_batch := len(batch_assignments))
 
-            batch_data_slice = batch_data[: instances_in_batch]
-            cpu_buffer_slice = cpu_buffer[: instances_in_batch]
+            num_vblks_in_batch = len(batch_assignments)
+            instances_in_batch = instances_per_vblock * num_vblks_in_batch - (
+                last_pblock_deficit if i == num_batches - 1 else 0
+            )
+
+            batch_data_slice = batch_data[:instances_in_batch]
+            cpu_buffer_slice = cpu_buffer[:instances_in_batch]
 
             seeds = torch.randint(
                 MIN_SEED, MAX_SEED, size=(num_vblks_in_batch,), device=device, dtype=torch.int32, generator=generator
@@ -87,10 +104,7 @@ def shuffle(
                 if pbid != -1:
                     pblk_data = _safe_read_arr(data, offset, int(pbid) * pblk_size, pblk_size)
                     start = proxy_pbid * pblk_size
-                    end = start + len(pblk_data)  # length can be less than pblk_size because of over-indexing guard
-                    # TODO: the cuda kernel guards against over-indexing in the pblocks by checking the global instance ID, but here, because of the block proxying, a shorted pblock is written on a standard pblock, with the pblock tail retaining trash data from torch.empty or instances from previous batches
-                    #       idea: if any of the batch assignment rows has the id of the last of all pblocks, move that row to the end and pre-sort the pblocks within it. Then, if the length above is indeed less, subtract that from the instances_in_batch. When calling the kernel binding, pass the slice [:instances_in_batch]
-                    cpu_buffer_slice[start:end] = pblk_data
+                    cpu_buffer_slice[start : start + len(pblk_data)] = pblk_data
             batch_data_slice.copy_(torch.from_numpy(cpu_buffer_slice))
 
             torch_binding(
