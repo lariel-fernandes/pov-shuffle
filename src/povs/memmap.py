@@ -81,11 +81,12 @@ def shuffle(
         ]
 
         for i in range(num_batches):
+            is_last_batch = i == num_batches - 1
             batch_assignments = vbid_2_bids[i * options.memmap_batch_size : (i + 1) * options.memmap_batch_size, :]
 
             num_vblks_in_batch = len(batch_assignments)
             instances_in_batch = instances_per_vblock * num_vblks_in_batch - (
-                last_pblock_deficit if i == num_batches - 1 else 0
+                last_pblock_deficit if is_last_batch else 0
             )
 
             batch_data_slice = batch_data[:instances_in_batch]
@@ -104,7 +105,7 @@ def shuffle(
                 if pbid != -1:
                     pblk_data = _safe_read_arr(data, offset, int(pbid) * pblk_size, pblk_size)
                     start = proxy_pbid * pblk_size
-                    cpu_buffer_slice[start : start + len(pblk_data)] = pblk_data
+                    cpu_buffer_slice[start : start + len(pblk_data)] = pblk_data.reshape(len(pblk_data), -1)
             batch_data_slice.copy_(torch.from_numpy(cpu_buffer_slice))
 
             torch_binding(
@@ -120,8 +121,12 @@ def shuffle(
             torch.from_numpy(cpu_buffer_slice).copy_(batch_data_slice)
             for proxy_pbid, pbid in enumerate(batch_assignments.ravel()):
                 if pbid != -1:
+                    is_last_pblock = is_last_batch and proxy_pbid == len(batch_assignments.ravel()) - 1
+                    instances_to_save = pblk_size - (last_pblock_deficit if is_last_pblock else 0)
                     start = proxy_pbid * pblk_size
-                    _safe_set_arr(data, offset, int(pbid) * pblk_size, cpu_buffer_slice[start : start + pblk_size])
+                    end = start + instances_to_save
+                    pblk_data = cpu_buffer_slice[start:end].reshape(instances_to_save, *data.shape[1:])
+                    _safe_set_arr(data, offset, int(pbid) * pblk_size, pblk_data)
 
             data.flush()
 

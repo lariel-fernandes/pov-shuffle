@@ -113,15 +113,18 @@ def _get_worker(
         """Processes a single virtual block ID."""
         valid_bids = [bid for bid in vbid_2_bids[vbid] if bid != -1]
 
-        local = np.concat([
+        blocks = [
             _safe_read_arr(data, offset, bid * options.physical_block_size, options.physical_block_size)
             for bid in valid_bids
-        ])
+        ]
+        local = np.concat(blocks)
         np.random.RandomState(seed=seeds[vbid]).shuffle(local)
 
-        for i, bid in enumerate(valid_bids):
-            shuffled = local[i * options.physical_block_size : (i + 1) * options.physical_block_size]
-            _safe_set_arr(data, offset, bid * options.physical_block_size, shuffled)
+        pos = 0
+        for bid, block in zip(valid_bids, blocks):
+            n = len(block)
+            _safe_set_arr(data, offset, bid * options.physical_block_size, local[pos : pos + n])
+            pos += n
 
     return _worker
 
